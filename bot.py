@@ -12,6 +12,7 @@ TOKEN = "MTQ3ODg0MjI0NzY2NjU5Nzk4MA.Ggg4u3.9Zqy8vw7Vky8wFjnXURoOTsdPU17KbAJFXpac
 WELCOME_CHANNEL_ID = 1488662459009994965
 BUMP_CHANNEL_ID    = 1381771230964748370
 GUILD_ID           = 1381768080610426930
+IMAGE_LOG_CHANNEL_ID = 1381770621054091306  # images from welcome channel get logged here
 
 # Cross-server mirroring
 MIRROR_SOURCE_CHANNEL_ID = 1489996127347413114   # channel to watch (friend's server)
@@ -70,6 +71,17 @@ async def on_message(message: discord.Message):
     global bump_task
 
     print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
+
+    # ── Image logger ──
+    if message.channel.id == WELCOME_CHANNEL_ID and not message.author.bot:
+        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+        images = [a for a in message.attachments if a.filename.lower().endswith(image_extensions)]
+        if images:
+            log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
+            if log_channel:
+                for image in images:
+                    await log_channel.send(file=await image.to_file())
+                print(f"[image_log] Logged {len(images)} image(s) from {message.author}.")
 
     # ── Cross-server mirror ──
     if message.channel.id == MIRROR_SOURCE_CHANNEL_ID:
