@@ -13,6 +13,7 @@ WELCOME_CHANNEL_ID = 1488662459009994965
 BUMP_CHANNEL_ID    = 1381771230964748370
 GUILD_ID           = 1381768080610426930
 IMAGE_LOG_CHANNEL_ID = 1381770621054091306  # images from welcome channel get logged here
+ANNOUNCE_SOURCE_CHANNEL_ID = 1489993668126572545  # messages here get copied to welcome channel
 
 # Cross-server mirroring
 MIRROR_SOURCE_CHANNEL_ID = 1489996127347413114   # channel to watch (friend's server)
@@ -80,8 +81,26 @@ async def on_message(message: discord.Message):
             log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
             if log_channel:
                 for image in images:
-                    await log_channel.send(file=await image.to_file())
+                    await log_channel.send(
+                        f"📸 **{message.author.display_name}**",
+                        file=await image.to_file()
+                    )
                 print(f"[image_log] Logged {len(images)} image(s) from {message.author}.")
+
+    # ── Announce to welcome channel ──
+    if message.channel.id == ANNOUNCE_SOURCE_CHANNEL_ID and not message.author.bot:
+        welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
+        if welcome_channel:
+            # Send text content if any
+            if message.content:
+                await welcome_channel.send(message.content)
+            # Send embeds
+            for embed in message.embeds:
+                await welcome_channel.send(embed=embed)
+            # Send attachments
+            for attachment in message.attachments:
+                await welcome_channel.send(file=await attachment.to_file())
+            print(f"[announce] Mirrored message from {message.author} to welcome channel.")
 
     # ── Cross-server mirror ──
     if message.channel.id == MIRROR_SOURCE_CHANNEL_ID:
