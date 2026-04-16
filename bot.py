@@ -94,12 +94,13 @@ async def on_message(message: discord.Message):
             # Send text content if any
             if message.content:
                 await welcome_channel.send(message.content)
-            # Send embeds
-            for embed in message.embeds:
-                await welcome_channel.send(embed=embed)
-            # Send attachments
+            # Send attachments (skip embeds as Discord auto-generates them from attachments)
             for attachment in message.attachments:
                 await welcome_channel.send(file=await attachment.to_file())
+            # Only send embeds that are not image/gif previews (e.g. rich embeds you manually add)
+            for embed in message.embeds:
+                if embed.type not in ("image", "gifv", "video"):
+                    await welcome_channel.send(embed=embed)
             print(f"[announce] Mirrored message from {message.author} to welcome channel.")
 
     # ── Cross-server mirror ──
