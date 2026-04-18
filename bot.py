@@ -12,7 +12,8 @@ TOKEN = "MTQ3ODg0MjI0NzY2NjU5Nzk4MA.Ggg4u3.9Zqy8vw7Vky8wFjnXURoOTsdPU17KbAJFXpac
 WELCOME_CHANNEL_ID = 1488662459009994965
 BUMP_CHANNEL_ID    = 1381771230964748370
 GUILD_ID           = 1381768080610426930
-IMAGE_LOG_CHANNEL_ID = 1381770621054091306  # images from welcome channel get logged here
+BUMP_BOT_ID        = 302050872383242240    # only this bot resets the bump timer
+IMAGE_LOG_CHANNEL_ID = 1381770621054091306 # all images from all channels get logged here
 ANNOUNCE_SOURCE_CHANNEL_ID = 1489993668126572545  # messages here get copied to welcome channel
 
 # Cross-server mirroring
@@ -73,31 +74,28 @@ async def on_message(message: discord.Message):
 
     print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
 
-    # ── Image logger ──
-    if message.channel.id == WELCOME_CHANNEL_ID and not message.author.bot:
+    # ── Image logger (all channels) ──
+    if not message.author.bot:
         image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
         images = [a for a in message.attachments if a.filename.lower().endswith(image_extensions)]
         if images:
             log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
-            if log_channel:
+            if log_channel and message.channel.id != IMAGE_LOG_CHANNEL_ID:
                 for image in images:
                     await log_channel.send(
-                        f"📸 **{message.author.display_name}**",
+                        f"📸 **{message.author.display_name}** (#{message.channel.name})",
                         file=await image.to_file()
                     )
-                print(f"[image_log] Logged {len(images)} image(s) from {message.author}.")
+                print(f"[image_log] Logged {len(images)} image(s) from {message.author} in #{message.channel.name}.")
 
     # ── Announce to welcome channel ──
     if message.channel.id == ANNOUNCE_SOURCE_CHANNEL_ID and not message.author.bot:
         welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
         if welcome_channel:
-            # Send text content if any
             if message.content:
                 await welcome_channel.send(message.content)
-            # Send attachments (skip embeds as Discord auto-generates them from attachments)
             for attachment in message.attachments:
                 await welcome_channel.send(file=await attachment.to_file())
-            # Only send embeds that are not image/gif previews (e.g. rich embeds you manually add)
             for embed in message.embeds:
                 if embed.type not in ("image", "gifv", "video"):
                     await welcome_channel.send(embed=embed)
@@ -108,24 +106,23 @@ async def on_message(message: discord.Message):
         if not (message.author == bot.user):
             target = bot.get_channel(MIRROR_TARGET_CHANNEL_ID)
             if target:
-                # Send the message text if there is one
                 if message.content:
                     await target.send(message.content)
-                # Send any attachments
                 for attachment in message.attachments:
                     await target.send(file=await attachment.to_file())
                 print(f"[mirror] Mirrored message from {message.author} ({len(message.attachments)} attachments)")
             else:
                 print(f"[mirror] ERROR: Target channel {MIRROR_TARGET_CHANNEL_ID} not found.")
 
-    # ── Bump reminder ──
+    # ── Bump reminder (only resets on bump bot messages) ──
     if message.channel.id == BUMP_CHANNEL_ID:
         if message.author == bot.user and message.content == BUMP_MESSAGE:
             return
-        if bump_task and not bump_task.done():
-            bump_task.cancel()
-            print("[bump] Timer reset due to new message.")
-        bump_task = asyncio.ensure_future(schedule_bump())
+        if message.author.id == BUMP_BOT_ID:
+            if bump_task and not bump_task.done():
+                bump_task.cancel()
+            bump_task = asyncio.ensure_future(schedule_bump())
+            print("[bump] Timer reset by bump bot.")
 
     await bot.process_commands(message)
 
