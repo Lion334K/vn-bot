@@ -207,20 +207,22 @@ async def hourly_embed():
             print("[hourly_embed] ERROR: Channel not found.")
             return
 
-        # Collect all messages that have embeds
-        messages_with_embeds = []
+        # Collect all messages that have attachments or links
+        valid_messages = []
         async for msg in pool_channel.history(limit=200):
-            if msg.embeds:
-                messages_with_embeds.append(msg)
+            if msg.attachments or msg.content:
+                valid_messages.append(msg)
 
-        if not messages_with_embeds:
-            print("[hourly_embed] No embeds found in pool channel.")
+        if not valid_messages:
+            print("[hourly_embed] No messages found in pool channel.")
             return
 
-        chosen = random.choice(messages_with_embeds)
-        for embed in chosen.embeds:
-            await welcome_channel.send(embed=embed)
-        print(f"[hourly_embed] Sent a random embed to welcome channel.")
+        chosen = random.choice(valid_messages)
+        if chosen.content:
+            await welcome_channel.send(chosen.content)
+        for attachment in chosen.attachments:
+            await welcome_channel.send(file=await attachment.to_file())
+        print(f"[hourly_embed] Sent a random post to welcome channel.")
     except Exception as e:
         print(f"[hourly_embed] ERROR: {e}")
 
