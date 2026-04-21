@@ -1,7 +1,8 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import asyncio
+import random
 
 # ───────────────────────────────────────────────
 #  CONFIGURATION
@@ -15,6 +16,7 @@ GUILD_ID           = 1381768080610426930
 BUMP_BOT_ID        = 302050872383242240    # only this bot resets the bump timer
 IMAGE_LOG_CHANNEL_ID = 1381770621054091306 # all images from all channels get logged here
 ANNOUNCE_SOURCE_CHANNEL_ID = 1489993668126572545  # messages here get copied to welcome channel
+EMBED_POOL_CHANNEL_ID      = 1496171911908950027  # random embed picked from here every hour
 
 # Cross-server mirroring
 MIRROR_SOURCE_CHANNEL_ID = 1489996127347413114   # channel to watch (friend's server)
@@ -54,6 +56,8 @@ async def on_ready():
         print(f"Synced {len(synced)} slash command(s) to guild.")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
+    if not hourly_embed.is_running():
+        hourly_embed.start()
 
 
 @bot.event
@@ -188,6 +192,37 @@ async def set_bump(interaction: discord.Interaction, message: str):
     global BUMP_MESSAGE
     BUMP_MESSAGE = message
     await interaction.response.send_message(f"✅ Bump mesajı güncellendi:\n> {BUMP_MESSAGE}")
+
+
+# ───────────────────────────────────────────────
+#  HOURLY EMBED
+# ───────────────────────────────────────────────
+
+@tasks.loop(hours=1)
+async def hourly_embed():
+    try:
+        pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
+        welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
+        if pool_channel is None or welcome_channel is None:
+            print("[hourly_embed] ERROR: Channel not found.")
+            return
+
+        # Collect all messages that have embeds
+        messages_with_embeds = []
+        async for msg in pool_channel.history(limit=200):
+            if msg.embeds:
+                messages_with_embeds.append(msg)
+
+        if not messages_with_embeds:
+            print("[hourly_embed] No embeds found in pool channel.")
+            return
+
+        chosen = random.choice(messages_with_embeds)
+        for embed in chosen.embeds:
+            await welcome_channel.send(embed=embed)
+        print(f"[hourly_embed] Sent a random embed to welcome channel.")
+    except Exception as e:
+        print(f"[hourly_embed] ERROR: {e}")
 
 
 # ───────────────────────────────────────────────
