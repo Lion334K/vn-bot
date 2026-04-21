@@ -224,6 +224,10 @@ async def hourly_embed():
     except Exception as e:
         print(f"[hourly_embed] ERROR: {e}")
 
+@hourly_embed.before_loop
+async def before_hourly_embed():
+    await bot.wait_until_ready()
+
 
 # ───────────────────────────────────────────────
 #  RUN
