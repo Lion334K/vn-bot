@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 import asyncio
-import random
 
 # ───────────────────────────────────────────────
 #  CONFIGURATION
@@ -16,7 +15,6 @@ GUILD_ID           = 1381768080610426930
 BUMP_BOT_ID        = 302050872383242240    # only this bot resets the bump timer
 IMAGE_LOG_CHANNEL_ID = 1381770621054091306 # all images from all channels get logged here
 ANNOUNCE_SOURCE_CHANNEL_ID = 1489993668126572545  # messages here get copied to welcome channel
-EMBED_POOL_CHANNEL_ID      = 1496171911908950027  # random embed picked from here every hour
 
 # Cross-server mirroring
 MIRROR_SOURCE_CHANNEL_ID = 1489996127347413114   # channel to watch (friend's server)
@@ -56,8 +54,6 @@ async def on_ready():
         print(f"Synced {len(synced)} slash command(s) to guild.")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
-    if not hourly_embed.is_running():
-        hourly_embed.start()
 
 
 @bot.event
@@ -192,43 +188,6 @@ async def set_bump(interaction: discord.Interaction, message: str):
     global BUMP_MESSAGE
     BUMP_MESSAGE = message
     await interaction.response.send_message(f"✅ Bump mesajı güncellendi:\n> {BUMP_MESSAGE}")
-
-
-# ───────────────────────────────────────────────
-#  HOURLY EMBED
-# ───────────────────────────────────────────────
-
-@tasks.loop(hours=1)
-async def hourly_embed():
-    try:
-        pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
-        welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
-        if pool_channel is None or welcome_channel is None:
-            print("[hourly_embed] ERROR: Channel not found.")
-            return
-
-        # Collect all messages that have attachments or links
-        valid_messages = []
-        async for msg in pool_channel.history(limit=200):
-            if msg.attachments or msg.content:
-                valid_messages.append(msg)
-
-        if not valid_messages:
-            print("[hourly_embed] No messages found in pool channel.")
-            return
-
-        chosen = random.choice(valid_messages)
-        if chosen.content:
-            await welcome_channel.send(chosen.content)
-        for attachment in chosen.attachments:
-            await welcome_channel.send(file=await attachment.to_file())
-        print(f"[hourly_embed] Sent a random post to welcome channel.")
-    except Exception as e:
-        print(f"[hourly_embed] ERROR: {e}")
-
-@hourly_embed.before_loop
-async def before_hourly_embed():
-    await bot.wait_until_ready()
 
 
 # ───────────────────────────────────────────────
