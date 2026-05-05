@@ -56,8 +56,6 @@ async def on_ready():
         print(f"Synced {len(synced)} slash command(s) to guild.")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
-    if not random_media.is_running():
-        random_media.start()
 
 
 @bot.event
@@ -195,10 +193,10 @@ async def set_bump(interaction: discord.Interaction, message: str):
 
 
 # ───────────────────────────────────────────────
-#  RANDOM MEDIA EVERY 3 HOURS
+#  RANDOM MEDIA EVERY 2 HOURS
 # ───────────────────────────────────────────────
 
-@tasks.loop(hours=3)
+@tasks.loop(hours=2)
 async def random_media():
     try:
         pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
@@ -228,6 +226,26 @@ async def random_media():
 @random_media.before_loop
 async def before_random_media():
     await bot.wait_until_ready()
+
+
+@bot.tree.command(name="startmedia", description="Start posting a random image/gif every 2 hours.")
+@app_commands.checks.has_permissions(administrator=True)
+async def start_media(interaction: discord.Interaction):
+    if random_media.is_running():
+        await interaction.response.send_message("⚠️ Random media is already running!")
+        return
+    random_media.start()
+    await interaction.response.send_message("✅ Random media started! A random image/gif will be posted every 2 hours.")
+
+
+@bot.tree.command(name="stopmedia", description="Stop posting random images/gifs.")
+@app_commands.checks.has_permissions(administrator=True)
+async def stop_media(interaction: discord.Interaction):
+    if random_media.is_running():
+        random_media.cancel()
+        await interaction.response.send_message("🛑 Random media stopped.")
+    else:
+        await interaction.response.send_message("⚠️ Random media isn't running.")
 
 
 # ───────────────────────────────────────────────
