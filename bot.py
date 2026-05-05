@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 import asyncio
+import random
 
 # ───────────────────────────────────────────────
 #  CONFIGURATION
@@ -15,6 +16,7 @@ GUILD_ID           = 1381768080610426930
 BUMP_BOT_ID        = 302050872383242240    # only this bot resets the bump timer
 IMAGE_LOG_CHANNEL_ID = 1381770621054091306 # all images from all channels get logged here
 ANNOUNCE_SOURCE_CHANNEL_ID = 1489993668126572545  # messages here get copied to welcome channel
+EMBED_POOL_CHANNEL_ID      = 1501344668242280559  # random gif/image picked from here every 3 hours
 
 # Cross-server mirroring
 MIRROR_SOURCE_CHANNEL_ID = 1489996127347413114   # channel to watch (friend's server)
@@ -54,6 +56,8 @@ async def on_ready():
         print(f"Synced {len(synced)} slash command(s) to guild.")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
+    if not random_media.is_running():
+        random_media.start()
 
 
 @bot.event
@@ -188,6 +192,42 @@ async def set_bump(interaction: discord.Interaction, message: str):
     global BUMP_MESSAGE
     BUMP_MESSAGE = message
     await interaction.response.send_message(f"✅ Bump mesajı güncellendi:\n> {BUMP_MESSAGE}")
+
+
+# ───────────────────────────────────────────────
+#  RANDOM MEDIA EVERY 3 HOURS
+# ───────────────────────────────────────────────
+
+@tasks.loop(hours=3)
+async def random_media():
+    try:
+        pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
+        welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
+        if pool_channel is None or welcome_channel is None:
+            print("[random_media] ERROR: Channel not found.")
+            return
+
+        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+        valid_messages = []
+        async for msg in pool_channel.history(limit=200):
+            media = [a for a in msg.attachments if a.filename.lower().endswith(image_extensions)]
+            if media:
+                valid_messages.append((msg, media))
+
+        if not valid_messages:
+            print("[random_media] No images/gifs found in pool channel.")
+            return
+
+        chosen_msg, chosen_media = random.choice(valid_messages)
+        attachment = random.choice(chosen_media)
+        await welcome_channel.send(file=await attachment.to_file())
+        print(f"[random_media] Sent a random image/gif to welcome channel.")
+    except Exception as e:
+        print(f"[random_media] ERROR: {e}")
+
+@random_media.before_loop
+async def before_random_media():
+    await bot.wait_until_ready()
 
 
 # ───────────────────────────────────────────────
