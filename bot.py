@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 import asyncio
 import random
+from datetime import datetime, timezone, timedelta
 
 # ───────────────────────────────────────────────
 #  CONFIGURATION
@@ -196,8 +197,12 @@ async def set_bump(interaction: discord.Interaction, message: str):
 #  RANDOM MEDIA EVERY 2 HOURS
 # ───────────────────────────────────────────────
 
-@tasks.loop(hours=1)
-async def random_media():
+# ───────────────────────────────────────────────
+#  RANDOM MEDIA (ACTIVITY BASED)
+# ───────────────────────────────────────────────
+
+async def post_random_media():
+    """Pick a random image/gif from the pool and post it to the welcome channel."""
     try:
         pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
         welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
@@ -219,33 +224,73 @@ async def random_media():
         chosen_msg, chosen_media = random.choice(valid_messages)
         attachment = random.choice(chosen_media)
         await welcome_channel.send(file=await attachment.to_file())
-        print(f"[random_media] Sent a random image/gif to welcome channel.")
+        print("[random_media] Sent a random image/gif to welcome channel.")
     except Exception as e:
         print(f"[random_media] ERROR: {e}")
 
-@random_media.before_loop
-async def before_random_media():
-    await bot.wait_until_ready()
+
+async def get_active_user_count() -> int:
+    """Count unique users who sent a message in the welcome channel in the last 30 minutes."""
+    welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
+    if welcome_channel is None:
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+    users = set()
+    async for msg in welcome_channel.history(limit=100, after=cutoff):
+        if not msg.author.bot:
+            users.add(msg.author.id)
+    return len(users)
 
 
-@bot.tree.command(name="startmedia", description="Start posting a random image/gif every hour.")
+async def run_media_loop():
+    """Dynamically adjusts posting interval based on chat activity."""
+    while media_loop_running:
+        active_users = await get_active_user_count()
+        print(f"[random_media] Active users in last 30min: {active_users}")
+
+        if active_users >= 5:
+            interval = 30 * 60        # 30 minutes
+        elif active_users >= 3:
+            interval = 1 * 60 * 60    # 1 hour
+        else:
+            interval = 3 * 60 * 60    # 3 hours
+
+        await post_random_media()
+        await asyncio.sleep(interval)
+
+
+media_loop_running = False
+media_loop_task = None
+
+
+@bot.tree.command(name="startmedia", description="Start posting random images/gifs based on chat activity.")
 @app_commands.checks.has_permissions(administrator=True)
 async def start_media(interaction: discord.Interaction):
-    if random_media.is_running():
+    global media_loop_running, media_loop_task
+    if media_loop_running:
         await interaction.response.send_message("⚠️ Random media is already running!")
         return
-    random_media.start()
-    await interaction.response.send_message("✅ Random media started! A random image/gif will be posted every hour.")
+    media_loop_running = True
+    media_loop_task = asyncio.ensure_future(run_media_loop())
+    await interaction.response.send_message(
+        "✅ Random media started!\n"
+        "• 5+ active users → every 30 minutes\n"
+        "• 3-4 active users → every hour\n"
+        "• 2 or fewer → every 3 hours"
+    )
 
 
 @bot.tree.command(name="stopmedia", description="Stop posting random images/gifs.")
 @app_commands.checks.has_permissions(administrator=True)
 async def stop_media(interaction: discord.Interaction):
-    if random_media.is_running():
-        random_media.cancel()
-        await interaction.response.send_message("🛑 Random media stopped.")
-    else:
+    global media_loop_running, media_loop_task
+    if not media_loop_running:
         await interaction.response.send_message("⚠️ Random media isn't running.")
+        return
+    media_loop_running = False
+    if media_loop_task and not media_loop_task.done():
+        media_loop_task.cancel()
+    await interaction.response.send_message("🛑 Random media stopped.")
 
 
 # ───────────────────────────────────────────────
