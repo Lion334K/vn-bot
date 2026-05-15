@@ -200,29 +200,27 @@ async def set_bump(interaction: discord.Interaction, message: str):
 # ───────────────────────────────────────────────
 
 async def post_random_media():
-    """Pick a random image/gif from the pool and post it to the welcome channel."""
+    """Pick the next image/gif from the queue and post it to the welcome channel."""
+    global media_queue
     try:
-        pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
         welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
-        if pool_channel is None or welcome_channel is None:
-            print("[random_media] ERROR: Channel not found.")
+        if welcome_channel is None:
+            print("[random_media] ERROR: Welcome channel not found.")
             return
 
-        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-        valid_messages = []
-        async for msg in pool_channel.history(limit=200):
-            media = [a for a in msg.attachments if a.filename.lower().endswith(image_extensions)]
-            if media:
-                valid_messages.append((msg, media))
+        # Rebuild queue if empty
+        if not media_queue:
+            print("[random_media] Queue empty, rebuilding...")
+            media_queue = await get_media_queue()
 
-        if not valid_messages:
+        if not media_queue:
             print("[random_media] No images/gifs found in pool channel.")
             return
 
-        chosen_msg, chosen_media = random.choice(valid_messages)
+        chosen_msg, chosen_media = media_queue.pop(0)
         attachment = random.choice(chosen_media)
         await welcome_channel.send(file=await attachment.to_file())
-        print("[random_media] Sent a random image/gif to welcome channel.")
+        print(f"[random_media] Sent image/gif. {len(media_queue)} remaining in queue.")
     except Exception as e:
         print(f"[random_media] ERROR: {e}")
 
@@ -259,6 +257,23 @@ async def run_media_loop():
 
 media_loop_running = False
 media_loop_task = None
+media_queue = []  # shuffled queue to avoid repeats
+
+
+async def get_media_queue() -> list:
+    """Fetch all images/gifs from the pool channel and return a shuffled list."""
+    pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
+    if pool_channel is None:
+        return []
+    image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+    valid = []
+    async for msg in pool_channel.history(limit=200):
+        media = [a for a in msg.attachments if a.filename.lower().endswith(image_extensions)]
+        if media:
+            valid.append((msg, media))
+    random.shuffle(valid)
+    print(f"[random_media] Built new queue with {len(valid)} items.")
+    return valid
 
 
 @bot.tree.command(name="startmedia", description="Start posting random images/gifs based on chat activity.")
