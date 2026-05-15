@@ -77,19 +77,17 @@ async def on_message(message: discord.Message):
 
     print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
 
-    # ── Image logger (all channels) ──
+    # ── Media & file logger (all channels) ──
     if not message.author.bot:
-        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-        images = [a for a in message.attachments if a.filename.lower().endswith(image_extensions)]
-        if images:
-            log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
-            if log_channel and message.channel.id != IMAGE_LOG_CHANNEL_ID:
-                for image in images:
+        log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
+        if log_channel and message.channel.id != IMAGE_LOG_CHANNEL_ID:
+            if message.attachments:
+                for attachment in message.attachments:
                     await log_channel.send(
-                        f"📸 **{message.author.display_name}** (#{message.channel.name})",
-                        file=await image.to_file()
+                        f"📎 **{message.author.display_name}** (#{message.channel.name})",
+                        file=await attachment.to_file()
                     )
-                print(f"[image_log] Logged {len(images)} image(s) from {message.author} in #{message.channel.name}.")
+                print(f"[log] Logged {len(message.attachments)} attachment(s) from {message.author} in #{message.channel.name}.")
 
     # ── Announce to welcome channel ──
     if message.channel.id == ANNOUNCE_SOURCE_CHANNEL_ID and not message.author.bot:
