@@ -45,6 +45,7 @@ media_queue        = []
 
 @bot.event
 async def on_ready():
+    global media_loop_running, media_loop_task, bump_task
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
     try:
         guild = discord.Object(id=GUILD_ID)
@@ -54,6 +55,33 @@ async def on_ready():
         print(f"Synced {len(synced)} slash command(s) to guild.")
     except Exception as e:
         print(f"Failed to sync commands: {e}")
+
+    # ── Auto-restart bump reminder ──
+    try:
+        bump_channel = bot.get_channel(BUMP_CHANNEL_ID)
+        if bump_channel:
+            messages = [msg async for msg in bump_channel.history(limit=10)]
+            # Find the last message from the bump bot
+            last_bump = next((m for m in messages if m.author.id == BUMP_BOT_ID), None)
+            if last_bump:
+                elapsed = (datetime.now(timezone.utc) - last_bump.created_at).total_seconds()
+                remaining = (2 * 60 * 60) - elapsed
+                if remaining > 0:
+                    print(f"[bump] Resuming — sending reminder in {int(remaining // 60)} minutes.")
+                    bump_task = asyncio.ensure_future(schedule_bump_in(remaining))
+                else:
+                    print("[bump] Time already passed, sending reminder now.")
+                    bump_task = asyncio.ensure_future(schedule_bump_in(0))
+            else:
+                print("[bump] No previous bump bot message found.")
+    except Exception as e:
+        print(f"[bump] Error resuming bump timer: {e}")
+
+    # ── Auto-restart random media ──
+    if not media_loop_running:
+        media_loop_running = True
+        media_loop_task = asyncio.ensure_future(run_media_loop())
+        print("[random_media] Auto-started on ready.")
 
 
 @bot.event
@@ -128,6 +156,18 @@ async def on_message(message: discord.Message):
 async def schedule_bump():
     try:
         await asyncio.sleep(2 * 60 * 60)
+        channel = bot.get_channel(BUMP_CHANNEL_ID)
+        if channel:
+            await channel.send(BUMP_MESSAGE)
+            print("[bump] Reminder sent.")
+    except asyncio.CancelledError:
+        pass
+
+
+async def schedule_bump_in(seconds: float):
+    """Schedule a bump reminder after a specific number of seconds."""
+    try:
+        await asyncio.sleep(max(0, seconds))
         channel = bot.get_channel(BUMP_CHANNEL_ID)
         if channel:
             await channel.send(BUMP_MESSAGE)
