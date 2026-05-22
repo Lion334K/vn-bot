@@ -3,8 +3,6 @@ from discord.ext import commands, tasks
 from discord import app_commands
 import asyncio
 import random
-import json
-import os
 from datetime import datetime, timezone, timedelta
 
 # ───────────────────────────────────────────────
@@ -36,28 +34,10 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-bump_task        = None
+bump_task          = None
 media_loop_running = False
-media_loop_task  = None
-media_queue      = []
-
-# ───────────────────────────────────────────────
-#  POINTS SYSTEM
-# ───────────────────────────────────────────────
-
-POINTS_FILE = "points.json"
-
-def load_points() -> dict:
-    if os.path.exists(POINTS_FILE):
-        with open(POINTS_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_points(data: dict):
-    with open(POINTS_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
-points_data: dict = {}
+media_loop_task    = None
+media_queue        = []
 
 # ───────────────────────────────────────────────
 #  EVENTS
@@ -65,9 +45,7 @@ points_data: dict = {}
 
 @bot.event
 async def on_ready():
-    global points_data
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
-    points_data = load_points()
     try:
         guild = discord.Object(id=GUILD_ID)
         bot.tree.clear_commands(guild=guild)
@@ -183,11 +161,11 @@ async def test_mirror(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     source = bot.get_channel(MIRROR_SOURCE_CHANNEL_ID)
     if source is None:
-        await interaction.followup.send(f"❌ Source channel not found.", ephemeral=True)
+        await interaction.followup.send("❌ Source channel not found.", ephemeral=True)
         return
     target = bot.get_channel(MIRROR_TARGET_CHANNEL_ID)
     if target is None:
-        await interaction.followup.send(f"❌ Target channel not found.", ephemeral=True)
+        await interaction.followup.send("❌ Target channel not found.", ephemeral=True)
         return
     messages = [msg async for msg in source.history(limit=1)]
     if not messages:
@@ -210,91 +188,32 @@ async def set_bump(interaction: discord.Interaction, message: str):
 
 
 # ───────────────────────────────────────────────
-#  SLASH COMMANDS  –  Points
-# ───────────────────────────────────────────────
-
-@bot.tree.command(name="addpoints", description="Give points to a user.")
-@app_commands.checks.has_permissions(administrator=True)
-async def add_points(interaction: discord.Interaction, user: discord.Member, points: int):
-    uid = str(user.id)
-    points_data[uid] = points_data.get(uid, 0) + points
-    save_points(points_data)
-    await interaction.response.send_message(
-        f"✅ **{user.display_name}** now has **{points_data[uid]}** points.",
-        ephemeral=True
-    )
-
-
-@bot.tree.command(name="removepoints", description="Remove points from a user.")
-@app_commands.checks.has_permissions(administrator=True)
-async def remove_points(interaction: discord.Interaction, user: discord.Member, points: int):
-    uid = str(user.id)
-    points_data[uid] = max(0, points_data.get(uid, 0) - points)
-    save_points(points_data)
-    await interaction.response.send_message(
-        f"✅ **{user.display_name}** now has **{points_data[uid]}** points.",
-        ephemeral=True
-    )
-
-
-@bot.tree.command(name="points", description="Check how many points a user has.")
-async def check_points(interaction: discord.Interaction, user: discord.Member = None):
-    target = user or interaction.user
-    uid = str(target.id)
-    total = points_data.get(uid, 0)
-    await interaction.response.send_message(
-        f"**{target.display_name}** has **{total}** points.",
-        ephemeral=True
-    )
-
-
-@bot.tree.command(name="leaderboard", description="Show the points leaderboard.")
-async def leaderboard(interaction: discord.Interaction):
-    if not points_data:
-        await interaction.response.send_message("No points have been given yet.", ephemeral=False)
-        return
-
-    sorted_users = sorted(points_data.items(), key=lambda x: x[1], reverse=True)
-
-    lines = []
-    medals = ["🥇", "🥈", "🥉"]
-    for i, (uid, pts) in enumerate(sorted_users[:10]):
-        try:
-            member = interaction.guild.get_member(int(uid))
-            name = member.display_name if member else f"User {uid}"
-        except Exception:
-            name = f"User {uid}"
-        prefix = medals[i] if i < 3 else f"**{i+1}.**"
-        lines.append(f"{prefix} {name} — **{pts}** points")
-
-    embed = discord.Embed(
-        title="🏆 Leaderboard",
-        description="\n".join(lines),
-        color=discord.Color.gold()
-    )
-    await interaction.response.send_message(embed=embed)
-
-
-# ───────────────────────────────────────────────
 #  RANDOM MEDIA (ACTIVITY BASED)
 # ───────────────────────────────────────────────
 
 async def get_media_queue() -> list:
-    pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
-    if pool_channel is None:
+    """Fetch all images/gifs from pool channel, return shuffled list."""
+    try:
+        pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
+        if pool_channel is None:
+            print("[random_media] ERROR: Pool channel not found.")
+            return []
+        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+        valid = []
+        async for msg in pool_channel.history(limit=200):
+            media = [a for a in msg.attachments if a.filename.lower().endswith(image_extensions)]
+            if media:
+                valid.append((msg, media))
+        random.shuffle(valid)
+        print(f"[random_media] Built queue with {len(valid)} items.")
+        return valid
+    except Exception as e:
+        print(f"[random_media] ERROR building queue: {e}")
         return []
-    image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-    valid = []
-    async for msg in pool_channel.history(limit=200):
-        media = [a for a in msg.attachments if a.filename.lower().endswith(image_extensions)]
-        if media:
-            valid.append((msg, media))
-    random.shuffle(valid)
-    print(f"[random_media] Built new queue with {len(valid)} items.")
-    return valid
 
 
 async def post_random_media():
+    """Post the next item from the queue to the welcome channel."""
     global media_queue
     try:
         welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
@@ -310,35 +229,51 @@ async def post_random_media():
         chosen_msg, chosen_media = media_queue.pop(0)
         attachment = random.choice(chosen_media)
         await welcome_channel.send(file=await attachment.to_file())
-        print(f"[random_media] Sent image/gif. {len(media_queue)} remaining in queue.")
+        print(f"[random_media] Posted. {len(media_queue)} remaining in queue.")
     except Exception as e:
-        print(f"[random_media] ERROR: {e}")
+        print(f"[random_media] ERROR posting: {e}")
 
 
 async def get_active_user_count() -> int:
-    welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
-    if welcome_channel is None:
+    """Count unique non-bot users who sent a message in welcome channel in last 30 min."""
+    try:
+        welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
+        if welcome_channel is None:
+            return 0
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+        users = set()
+        async for msg in welcome_channel.history(limit=100, after=cutoff):
+            if not msg.author.bot:
+                users.add(msg.author.id)
+        return len(users)
+    except Exception as e:
+        print(f"[random_media] ERROR counting users: {e}")
         return 0
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
-    users = set()
-    async for msg in welcome_channel.history(limit=100, after=cutoff):
-        if not msg.author.bot:
-            users.add(msg.author.id)
-    return len(users)
 
 
 async def run_media_loop():
+    """Main loop: post media then wait based on activity level."""
     while media_loop_running:
-        active_users = await get_active_user_count()
-        print(f"[random_media] Active users in last 30min: {active_users}")
-        if active_users >= 5:
-            interval = 30 * 60
-        elif active_users >= 3:
-            interval = 1 * 60 * 60
-        else:
-            interval = 3 * 60 * 60
-        await post_random_media()
-        await asyncio.sleep(interval)
+        try:
+            active_users = await get_active_user_count()
+            print(f"[random_media] Active users in last 30min: {active_users}")
+
+            if active_users >= 5:
+                interval = 30 * 60       # 30 minutes
+            elif active_users >= 3:
+                interval = 60 * 60       # 1 hour
+            else:
+                interval = 3 * 60 * 60   # 3 hours
+
+            await post_random_media()
+            print(f"[random_media] Next post in {interval // 60} minutes.")
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            print("[random_media] Loop cancelled.")
+            break
+        except Exception as e:
+            print(f"[random_media] Unexpected error in loop: {e}")
+            await asyncio.sleep(60)  # wait 1 min before retrying on unexpected error
 
 
 @bot.tree.command(name="startmedia", description="Start posting random images/gifs based on chat activity.")
@@ -346,7 +281,7 @@ async def run_media_loop():
 async def start_media(interaction: discord.Interaction):
     global media_loop_running, media_loop_task
     if media_loop_running:
-        await interaction.response.send_message("⚠️ Random media is already running!", ephemeral=True)
+        await interaction.response.send_message("⚠️ Already running!", ephemeral=True)
         return
     media_loop_running = True
     media_loop_task = asyncio.ensure_future(run_media_loop())
@@ -358,7 +293,7 @@ async def start_media(interaction: discord.Interaction):
 async def stop_media(interaction: discord.Interaction):
     global media_loop_running, media_loop_task
     if not media_loop_running:
-        await interaction.response.send_message("⚠️ Random media isn't running.", ephemeral=True)
+        await interaction.response.send_message("⚠️ Not running.", ephemeral=True)
         return
     media_loop_running = False
     if media_loop_task and not media_loop_task.done():
