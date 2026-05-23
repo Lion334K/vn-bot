@@ -84,6 +84,9 @@ async def on_ready():
         print("[random_media] Auto-started on ready.")
 
 
+welcome_message_log: dict = {}  # member_id -> message_id
+
+
 @bot.event
 async def on_member_join(member: discord.Member):
     print(f"[welcome] {member} joined.")
@@ -92,8 +95,27 @@ async def on_member_join(member: discord.Member):
         print(f"[welcome] ERROR: Channel {WELCOME_CHANNEL_ID} not found.")
         return
     msg = WELCOME_MESSAGE.replace("{member}", member.mention)
-    await channel.send(msg)
+    sent = await channel.send(msg)
+    welcome_message_log[member.id] = sent.id
     print(f"[welcome] Message sent for {member}.")
+
+
+@bot.event
+async def on_member_remove(member: discord.Member):
+    print(f"[welcome] {member} left.")
+    if member.id not in welcome_message_log:
+        return
+    channel = bot.get_channel(WELCOME_CHANNEL_ID)
+    if channel is None:
+        return
+    try:
+        msg = await channel.fetch_message(welcome_message_log[member.id])
+        await msg.edit(content="geri gitti... 🥺")
+        print(f"[welcome] Edited welcome message for {member}.")
+    except Exception as e:
+        print(f"[welcome] Could not edit message: {e}")
+    finally:
+        del welcome_message_log[member.id]
 
 
 @bot.event
