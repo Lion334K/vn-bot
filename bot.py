@@ -34,10 +34,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-bump_task          = None
-media_loop_running = False
-media_loop_task    = None
-media_queue        = []
+image_only_channels: set = set()  # channel IDs that only allow images/gifs
 
 # ───────────────────────────────────────────────
 #  EVENTS
@@ -77,7 +74,9 @@ async def on_ready():
     except Exception as e:
         print(f"[bump] Error resuming bump timer: {e}")
 
-    # ── Auto-restart random media ──
+    # ── Auto-set image-only channel ──
+    image_only_channels.add(1500491845745119343)
+    print("[image_only] Channel 1500491845745119343 set to image-only.")
     if not media_loop_running:
         media_loop_running = True
         media_loop_task = asyncio.ensure_future(run_media_loop())
@@ -123,6 +122,20 @@ async def on_message(message: discord.Message):
     global bump_task
 
     print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
+
+    # ── Image-only channel enforcement ──
+    if message.channel.id in image_only_channels and not message.author.bot:
+        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".webm")
+        has_image = any(a.filename.lower().endswith(image_extensions) for a in message.attachments)
+        gif_domains = ("tenor.com", "giphy.com", "media.discordapp.net", "cdn.discordapp.com")
+        has_gif_link = any(domain in message.content for domain in gif_domains)
+        if not has_image and not has_gif_link:
+            try:
+                await message.delete()
+                print(f"[image_only] Deleted non-image message from {message.author} in #{message.channel.name}.")
+            except Exception as e:
+                print(f"[image_only] Could not delete message: {e}")
+            return
 
     # ── Media & file logger (all channels) ──
     if not message.author.bot:
@@ -361,6 +374,27 @@ async def stop_media(interaction: discord.Interaction):
     if media_loop_task and not media_loop_task.done():
         media_loop_task.cancel()
     await interaction.response.send_message("🛑 Stopped.", ephemeral=True)
+
+
+# ───────────────────────────────────────────────
+#  IMAGE-ONLY CHANNEL COMMANDS
+# ───────────────────────────────────────────────
+
+@bot.tree.command(name="setimagechannel", description="Set a channel to image-only mode. Non-image messages will be deleted.")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_image_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    image_only_channels.add(channel.id)
+    await interaction.response.send_message(f"✅ <#{channel.id}> is now image-only.", ephemeral=True)
+
+
+@bot.tree.command(name="removeimagechannel", description="Remove image-only mode from a channel.")
+@app_commands.checks.has_permissions(administrator=True)
+async def remove_image_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if channel.id in image_only_channels:
+        image_only_channels.discard(channel.id)
+        await interaction.response.send_message(f"✅ <#{channel.id}> is no longer image-only.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"⚠️ <#{channel.id}> was not set as image-only.", ephemeral=True)
 
 
 # ───────────────────────────────────────────────
