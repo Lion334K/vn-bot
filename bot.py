@@ -22,7 +22,7 @@ MIRROR_SOURCE_CHANNEL_ID   = 1489996127347413114
 MIRROR_TARGET_CHANNEL_ID   = 1488485721877643314
 
 WELCOME_MESSAGE = "Aramıza yeni biri katıldı! Hoşgeldin {member} 🥹"
-BUMP_MESSAGE    = "Buuuuuump"
+BUMP_MESSAGE    = "Bump yap LAN"
 
 # ───────────────────────────────────────────────
 #  BOT SETUP
