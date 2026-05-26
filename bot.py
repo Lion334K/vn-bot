@@ -22,7 +22,8 @@ MIRROR_SOURCE_CHANNEL_ID   = 1489996127347413114
 MIRROR_TARGET_CHANNEL_ID   = 1488485721877643314
 
 WELCOME_MESSAGE = "Aramıza yeni biri katıldı! Hoşgeldin {member} 🥹"
-BUMP_MESSAGE    = "Bump yap LAN"
+BUMP_MESSAGE    = "Buuuuuump"
+LOLI_GIF        = "https://media.discordapp.net/attachments/1276564607439339521/1284080876577226805/GXT93SRWIAASzMV.gif?ex=6a175fc2&is=6a160e42&hm=bc9abcc89fc1fd8f32de6fc186d68adcb0646dc8b50117ce597225b0c0c0cd2f&"
 
 # ───────────────────────────────────────────────
 #  BOT SETUP
@@ -34,7 +35,121 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-image_only_channels: set = set()  # channel IDs that only allow images/gifs
+# Runtime state
+bump_task          = None
+media_loop_running = False
+media_loop_task    = None
+media_queue        = []
+welcome_message_log: dict = {}
+
+# ───────────────────────────────────────────────
+#  BUMP HELPERS
+# ───────────────────────────────────────────────
+
+async def schedule_bump():
+    try:
+        await asyncio.sleep(2 * 60 * 60)
+        channel = bot.get_channel(BUMP_CHANNEL_ID)
+        if channel:
+            await channel.send(BUMP_MESSAGE)
+            print("[bump] Reminder sent.")
+    except asyncio.CancelledError:
+        pass
+
+
+async def schedule_bump_in(seconds: float):
+    try:
+        await asyncio.sleep(max(0, seconds))
+        channel = bot.get_channel(BUMP_CHANNEL_ID)
+        if channel:
+            await channel.send(BUMP_MESSAGE)
+            print("[bump] Reminder sent.")
+    except asyncio.CancelledError:
+        pass
+
+
+# ───────────────────────────────────────────────
+#  RANDOM MEDIA HELPERS
+# ───────────────────────────────────────────────
+
+async def get_media_queue() -> list:
+    try:
+        pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
+        if pool_channel is None:
+            print("[random_media] ERROR: Pool channel not found.")
+            return []
+        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+        valid = []
+        async for msg in pool_channel.history(limit=200):
+            media = [a for a in msg.attachments if a.filename.lower().endswith(image_extensions)]
+            if media:
+                valid.append((msg, media))
+        random.shuffle(valid)
+        print(f"[random_media] Built queue with {len(valid)} items.")
+        return valid
+    except Exception as e:
+        print(f"[random_media] ERROR building queue: {e}")
+        return []
+
+
+async def post_random_media():
+    global media_queue
+    try:
+        welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
+        if welcome_channel is None:
+            print("[random_media] ERROR: Welcome channel not found.")
+            return
+        if not media_queue:
+            print("[random_media] Queue empty, rebuilding...")
+            media_queue = await get_media_queue()
+        if not media_queue:
+            print("[random_media] No images/gifs found in pool channel.")
+            return
+        chosen_msg, chosen_media = media_queue.pop(0)
+        attachment = random.choice(chosen_media)
+        await welcome_channel.send(file=await attachment.to_file())
+        print(f"[random_media] Posted. {len(media_queue)} remaining in queue.")
+    except Exception as e:
+        print(f"[random_media] ERROR posting: {e}")
+
+
+async def get_active_user_count() -> int:
+    try:
+        welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
+        if welcome_channel is None:
+            return 0
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+        users = set()
+        async for msg in welcome_channel.history(limit=100, after=cutoff):
+            if not msg.author.bot:
+                users.add(msg.author.id)
+        return len(users)
+    except Exception as e:
+        print(f"[random_media] ERROR counting users: {e}")
+        return 0
+
+
+async def run_media_loop():
+    while media_loop_running:
+        try:
+            active_users = await get_active_user_count()
+            print(f"[random_media] Active users in last 30min: {active_users}")
+            if active_users >= 5:
+                interval = 30 * 60
+            elif active_users >= 3:
+                interval = 60 * 60
+            else:
+                interval = 3 * 60 * 60
+            await post_random_media()
+            print(f"[random_media] Next post in {interval // 60} minutes.")
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            print("[random_media] Loop cancelled.")
+            break
+        except Exception as e:
+            print(f"[random_media] Unexpected error in loop: {e}")
+            await asyncio.sleep(60)
+
 
 # ───────────────────────────────────────────────
 #  EVENTS
@@ -58,7 +173,6 @@ async def on_ready():
         bump_channel = bot.get_channel(BUMP_CHANNEL_ID)
         if bump_channel:
             messages = [msg async for msg in bump_channel.history(limit=10)]
-            # Find the last message from the bump bot
             last_bump = next((m for m in messages if m.author.id == BUMP_BOT_ID), None)
             if last_bump:
                 elapsed = (datetime.now(timezone.utc) - last_bump.created_at).total_seconds()
@@ -74,16 +188,11 @@ async def on_ready():
     except Exception as e:
         print(f"[bump] Error resuming bump timer: {e}")
 
-    # ── Auto-set image-only channel ──
-    image_only_channels.add(1500491845745119343)
-    print("[image_only] Channel 1500491845745119343 set to image-only.")
+    # ── Auto-start random media ──
     if not media_loop_running:
         media_loop_running = True
         media_loop_task = asyncio.ensure_future(run_media_loop())
         print("[random_media] Auto-started on ready.")
-
-
-welcome_message_log: dict = {}  # member_id -> message_id
 
 
 @bot.event
@@ -123,19 +232,10 @@ async def on_message(message: discord.Message):
 
     print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
 
-    # ── Image-only channel enforcement ──
-    if message.channel.id in image_only_channels and not message.author.bot:
-        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".webm")
-        has_image = any(a.filename.lower().endswith(image_extensions) for a in message.attachments)
-        gif_domains = ("tenor.com", "giphy.com", "media.discordapp.net", "cdn.discordapp.com")
-        has_gif_link = any(domain in message.content for domain in gif_domains)
-        if not has_image and not has_gif_link:
-            try:
-                await message.delete()
-                print(f"[image_only] Deleted non-image message from {message.author} in #{message.channel.name}.")
-            except Exception as e:
-                print(f"[image_only] Could not delete message: {e}")
-            return
+    # ── Loli response ──
+    if "loli" in message.content.lower() and not message.author.bot:
+        await message.channel.send(LOLI_GIF)
+        print(f"[loli] Responded to loli mention by {message.author}.")
 
     # ── Media & file logger (all channels) ──
     if not message.author.bot:
@@ -147,7 +247,7 @@ async def on_message(message: discord.Message):
                         f"📎 **{message.author.display_name}** (#{message.channel.name})",
                         file=await attachment.to_file()
                     )
-                print(f"[log] Logged {len(message.attachments)} attachment(s) from {message.author} in #{message.channel.name}.")
+                print(f"[log] Logged {len(message.attachments)} attachment(s) from {message.author}.")
 
     # ── Announce to welcome channel ──
     if message.channel.id == ANNOUNCE_SOURCE_CHANNEL_ID and not message.author.bot:
@@ -163,19 +263,18 @@ async def on_message(message: discord.Message):
             print(f"[announce] Mirrored message from {message.author} to welcome channel.")
 
     # ── Cross-server mirror ──
-    if message.channel.id == MIRROR_SOURCE_CHANNEL_ID:
-        if not (message.author == bot.user):
-            target = bot.get_channel(MIRROR_TARGET_CHANNEL_ID)
-            if target:
-                if message.content:
-                    await target.send(message.content)
-                for attachment in message.attachments:
-                    await target.send(file=await attachment.to_file())
-                print(f"[mirror] Mirrored message from {message.author} ({len(message.attachments)} attachments)")
-            else:
-                print(f"[mirror] ERROR: Target channel {MIRROR_TARGET_CHANNEL_ID} not found.")
+    if message.channel.id == MIRROR_SOURCE_CHANNEL_ID and message.author != bot.user:
+        target = bot.get_channel(MIRROR_TARGET_CHANNEL_ID)
+        if target:
+            if message.content:
+                await target.send(message.content)
+            for attachment in message.attachments:
+                await target.send(file=await attachment.to_file())
+            print(f"[mirror] Mirrored message from {message.author}.")
+        else:
+            print(f"[mirror] ERROR: Target channel not found.")
 
-    # ── Bump reminder (only resets on bump bot messages) ──
+    # ── Bump reminder ──
     if message.channel.id == BUMP_CHANNEL_ID:
         if message.author == bot.user and message.content == BUMP_MESSAGE:
             return
@@ -188,31 +287,8 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 
-async def schedule_bump():
-    try:
-        await asyncio.sleep(2 * 60 * 60)
-        channel = bot.get_channel(BUMP_CHANNEL_ID)
-        if channel:
-            await channel.send(BUMP_MESSAGE)
-            print("[bump] Reminder sent.")
-    except asyncio.CancelledError:
-        pass
-
-
-async def schedule_bump_in(seconds: float):
-    """Schedule a bump reminder after a specific number of seconds."""
-    try:
-        await asyncio.sleep(max(0, seconds))
-        channel = bot.get_channel(BUMP_CHANNEL_ID)
-        if channel:
-            await channel.send(BUMP_MESSAGE)
-            print("[bump] Reminder sent.")
-    except asyncio.CancelledError:
-        pass
-
-
 # ───────────────────────────────────────────────
-#  SLASH COMMANDS  –  Welcome & Mirror
+#  SLASH COMMANDS
 # ───────────────────────────────────────────────
 
 @bot.tree.command(name="setwelcome", description="Hoşgeldin mesajını değiştir. {member} yeni üyeyi etiketler.")
@@ -220,7 +296,7 @@ async def schedule_bump_in(seconds: float):
 async def set_welcome(interaction: discord.Interaction, message: str):
     global WELCOME_MESSAGE
     WELCOME_MESSAGE = message
-    await interaction.response.send_message(f"✅ Hoşgeldin mesajı güncellendi:\n> {WELCOME_MESSAGE}", ephemeral=True)
+    await interaction.response.send_message(f"✅ Güncellendi:\n> {WELCOME_MESSAGE}", ephemeral=True)
 
 
 @bot.tree.command(name="testwelcome", description="Mevcut hoşgeldin mesajını önizle.")
@@ -235,23 +311,20 @@ async def test_welcome(interaction: discord.Interaction):
 async def test_mirror(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     source = bot.get_channel(MIRROR_SOURCE_CHANNEL_ID)
-    if source is None:
-        await interaction.followup.send("❌ Source channel not found.", ephemeral=True)
-        return
     target = bot.get_channel(MIRROR_TARGET_CHANNEL_ID)
-    if target is None:
-        await interaction.followup.send("❌ Target channel not found.", ephemeral=True)
+    if source is None or target is None:
+        await interaction.followup.send("❌ Channel not found.", ephemeral=True)
         return
     messages = [msg async for msg in source.history(limit=1)]
     if not messages:
-        await interaction.followup.send("❌ No messages found in the source channel.", ephemeral=True)
+        await interaction.followup.send("❌ No messages found.", ephemeral=True)
         return
     last = messages[0]
     if last.content:
         await target.send(last.content)
     for attachment in last.attachments:
         await target.send(file=await attachment.to_file())
-    await interaction.followup.send(f"✅ Last message mirrored to <#{MIRROR_TARGET_CHANNEL_ID}>.", ephemeral=True)
+    await interaction.followup.send(f"✅ Mirrored to <#{MIRROR_TARGET_CHANNEL_ID}>.", ephemeral=True)
 
 
 @bot.tree.command(name="setbump", description="Bump hatırlatma mesajını değiştir.")
@@ -259,96 +332,7 @@ async def test_mirror(interaction: discord.Interaction):
 async def set_bump(interaction: discord.Interaction, message: str):
     global BUMP_MESSAGE
     BUMP_MESSAGE = message
-    await interaction.response.send_message(f"✅ Bump mesajı güncellendi:\n> {BUMP_MESSAGE}", ephemeral=True)
-
-
-# ───────────────────────────────────────────────
-#  RANDOM MEDIA (ACTIVITY BASED)
-# ───────────────────────────────────────────────
-
-async def get_media_queue() -> list:
-    """Fetch all images/gifs from pool channel, return shuffled list."""
-    try:
-        pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
-        if pool_channel is None:
-            print("[random_media] ERROR: Pool channel not found.")
-            return []
-        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-        valid = []
-        async for msg in pool_channel.history(limit=200):
-            media = [a for a in msg.attachments if a.filename.lower().endswith(image_extensions)]
-            if media:
-                valid.append((msg, media))
-        random.shuffle(valid)
-        print(f"[random_media] Built queue with {len(valid)} items.")
-        return valid
-    except Exception as e:
-        print(f"[random_media] ERROR building queue: {e}")
-        return []
-
-
-async def post_random_media():
-    """Post the next item from the queue to the welcome channel."""
-    global media_queue
-    try:
-        welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
-        if welcome_channel is None:
-            print("[random_media] ERROR: Welcome channel not found.")
-            return
-        if not media_queue:
-            print("[random_media] Queue empty, rebuilding...")
-            media_queue = await get_media_queue()
-        if not media_queue:
-            print("[random_media] No images/gifs found in pool channel.")
-            return
-        chosen_msg, chosen_media = media_queue.pop(0)
-        attachment = random.choice(chosen_media)
-        await welcome_channel.send(file=await attachment.to_file())
-        print(f"[random_media] Posted. {len(media_queue)} remaining in queue.")
-    except Exception as e:
-        print(f"[random_media] ERROR posting: {e}")
-
-
-async def get_active_user_count() -> int:
-    """Count unique non-bot users who sent a message in welcome channel in last 30 min."""
-    try:
-        welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
-        if welcome_channel is None:
-            return 0
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
-        users = set()
-        async for msg in welcome_channel.history(limit=100, after=cutoff):
-            if not msg.author.bot:
-                users.add(msg.author.id)
-        return len(users)
-    except Exception as e:
-        print(f"[random_media] ERROR counting users: {e}")
-        return 0
-
-
-async def run_media_loop():
-    """Main loop: post media then wait based on activity level."""
-    while media_loop_running:
-        try:
-            active_users = await get_active_user_count()
-            print(f"[random_media] Active users in last 30min: {active_users}")
-
-            if active_users >= 5:
-                interval = 30 * 60       # 30 minutes
-            elif active_users >= 3:
-                interval = 60 * 60       # 1 hour
-            else:
-                interval = 3 * 60 * 60   # 3 hours
-
-            await post_random_media()
-            print(f"[random_media] Next post in {interval // 60} minutes.")
-            await asyncio.sleep(interval)
-        except asyncio.CancelledError:
-            print("[random_media] Loop cancelled.")
-            break
-        except Exception as e:
-            print(f"[random_media] Unexpected error in loop: {e}")
-            await asyncio.sleep(60)  # wait 1 min before retrying on unexpected error
+    await interaction.response.send_message(f"✅ Güncellendi:\n> {BUMP_MESSAGE}", ephemeral=True)
 
 
 @bot.tree.command(name="startmedia", description="Start posting random images/gifs based on chat activity.")
@@ -374,27 +358,6 @@ async def stop_media(interaction: discord.Interaction):
     if media_loop_task and not media_loop_task.done():
         media_loop_task.cancel()
     await interaction.response.send_message("🛑 Stopped.", ephemeral=True)
-
-
-# ───────────────────────────────────────────────
-#  IMAGE-ONLY CHANNEL COMMANDS
-# ───────────────────────────────────────────────
-
-@bot.tree.command(name="setimagechannel", description="Set a channel to image-only mode. Non-image messages will be deleted.")
-@app_commands.checks.has_permissions(administrator=True)
-async def set_image_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-    image_only_channels.add(channel.id)
-    await interaction.response.send_message(f"✅ <#{channel.id}> is now image-only.", ephemeral=True)
-
-
-@bot.tree.command(name="removeimagechannel", description="Remove image-only mode from a channel.")
-@app_commands.checks.has_permissions(administrator=True)
-async def remove_image_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-    if channel.id in image_only_channels:
-        image_only_channels.discard(channel.id)
-        await interaction.response.send_message(f"✅ <#{channel.id}> is no longer image-only.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"⚠️ <#{channel.id}> was not set as image-only.", ephemeral=True)
 
 
 # ───────────────────────────────────────────────
