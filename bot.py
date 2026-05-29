@@ -3,13 +3,14 @@ from discord.ext import commands, tasks
 from discord import app_commands
 import asyncio
 import random
+import os
 from datetime import datetime, timezone, timedelta
 
 # ───────────────────────────────────────────────
 #  CONFIGURATION
 # ───────────────────────────────────────────────
 
-TOKEN = "MTQ3ODg0MjI0NzY2NjU5Nzk4MA.G41wtj.yYeUafzcZP6S95CMFXHhSB8Jtcc_IX7R_Mhnkk"
+TOKEN = os.environ["DISCORD_TOKEN"]
 
 WELCOME_CHANNEL_ID         = 1488662459009994965
 BUMP_CHANNEL_ID            = 1381771230964748370
@@ -22,8 +23,7 @@ MIRROR_SOURCE_CHANNEL_ID   = 1489996127347413114
 MIRROR_TARGET_CHANNEL_ID   = 1488485721877643314
 
 WELCOME_MESSAGE = "Aramıza yeni biri katıldı! Hoşgeldin {member} 🥹"
-BUMP_MESSAGE    = "lutfen bump yapin"
-LOLI_GIF        = "https://media.discordapp.net/attachments/1276564607439339521/1284080876577226805/GXT93SRWIAASzMV.gif?ex=6a175fc2&is=6a160e42&hm=bc9abcc89fc1fd8f32de6fc186d68adcb0646dc8b50117ce597225b0c0c0cd2f&"
+BUMP_MESSAGE    = "Buuuuuump"
 
 # ───────────────────────────────────────────────
 #  BOT SETUP
@@ -108,7 +108,7 @@ async def post_random_media():
         chosen_msg, chosen_media = media_queue.pop(0)
         attachment = random.choice(chosen_media)
         await welcome_channel.send(
-            f"**{chosen_msg.author.display_name}**",
+            f"**{chosen_msg.author.name}**",
             file=await attachment.to_file()
         )
         print(f"[random_media] Posted. {len(media_queue)} remaining in queue.")
@@ -234,11 +234,6 @@ async def on_message(message: discord.Message):
     global bump_task
 
     print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
-
-    # ── Loli response ──
-    if "loli" in message.content.lower() and not message.author.bot:
-        await message.channel.send(LOLI_GIF)
-        print(f"[loli] Responded to loli mention by {message.author}.")
 
     # ── Media & file logger (all channels) ──
     if not message.author.bot:
