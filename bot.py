@@ -22,7 +22,7 @@ MIRROR_SOURCE_CHANNEL_ID   = 1489996127347413114
 MIRROR_TARGET_CHANNEL_ID   = 1488485721877643314
 
 WELCOME_MESSAGE = "Aramıza yeni biri katıldı! Hoşgeldin {member} 🥹"
-BUMP_MESSAGE    = "Buuuuuump"
+BUMP_MESSAGE    = "lutfen bump yapin"
 LOLI_GIF        = "https://media.discordapp.net/attachments/1276564607439339521/1284080876577226805/GXT93SRWIAASzMV.gif?ex=6a175fc2&is=6a160e42&hm=bc9abcc89fc1fd8f32de6fc186d68adcb0646dc8b50117ce597225b0c0c0cd2f&"
 
 # ───────────────────────────────────────────────
@@ -78,7 +78,7 @@ async def get_media_queue() -> list:
         if pool_channel is None:
             print("[random_media] ERROR: Pool channel not found.")
             return []
-        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".webm")
         valid = []
         async for msg in pool_channel.history(limit=200):
             media = [a for a in msg.attachments if a.filename.lower().endswith(image_extensions)]
@@ -107,7 +107,10 @@ async def post_random_media():
             return
         chosen_msg, chosen_media = media_queue.pop(0)
         attachment = random.choice(chosen_media)
-        await welcome_channel.send(file=await attachment.to_file())
+        await welcome_channel.send(
+            f"**{chosen_msg.author.display_name}**",
+            file=await attachment.to_file()
+        )
         print(f"[random_media] Posted. {len(media_queue)} remaining in queue.")
     except Exception as e:
         print(f"[random_media] ERROR posting: {e}")
