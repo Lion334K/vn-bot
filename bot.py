@@ -72,6 +72,15 @@ def check_violation(content: str, stickers) -> bool:
     # Catch messages that are only spaces or whitespace
     if content.strip() == '' or all(c == ' ' or c == '\t' for c in content):
         return True
+    # Catch messages with excessive newlines (wall of empty space)
+    newline_count = content.count('\n')
+    if newline_count > 3:
+        return True
+    # Catch messages where actual non-whitespace content is tiny compared to total length
+    # e.g. "." + 200 spaces/newlines
+    real_content = content.replace(' ', '').replace('\n', '').replace('\t', '').replace('\r', '')
+    if len(content) > 20 and len(real_content) < 5:
+        return True
     if content != content.lower():
         return True
     has_unicode_emoji = bool(re.search(
