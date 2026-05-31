@@ -100,6 +100,12 @@ def check_violation(content: str, stickers) -> bool:
         return True
     if not ALLOWED_CHARS.match(content):
         return True
+    # Catch blockquotes (> at start of line)
+    if re.search(r'(^|\n)\s*>', content):
+        return True
+    # Catch channel/user/role mentions
+    if re.search(r'<[#@&]\d+>', content):
+        return True
     return False
 
 
