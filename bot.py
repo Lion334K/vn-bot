@@ -405,7 +405,53 @@ async def stop_media(interaction: discord.Interaction):
 
 
 @bot.event
-async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
+async def on_message_edit(before: discord.Message, after: discord.Message):
+    if not no_caps_enabled or after.author.bot:
+        return
+    if after.author.id in nocaps_immune:
+        return
+    if not hasattr(after.channel, 'category_id') or after.channel.category_id != NO_CAPS_CATEGORY_ID:
+        return
+
+    violation = False
+
+    if after.stickers:
+        violation = True
+
+    if not after.content or not after.content.strip():
+        violation = True
+
+    if after.content:
+        if after.content != after.content.lower():
+            violation = True
+        has_unicode_emoji = bool(re.search(
+            u"[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
+            u"\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF"
+            u"\U00002702-\U000027B0\U000024C2-\U0001F251"
+            u"\U0001f926-\U0001f937\U00010000-\U0010ffff"
+            u"\u2640-\u2642\u2600-\u2B55\u200d\u23cf"
+            u"\u23e9\u231a\ufe0f\u3030]+", after.content))
+        has_custom_emoji = bool(re.search(r"<a?:\w+:\d+>", after.content))
+        if has_unicode_emoji or has_custom_emoji:
+            violation = True
+        invisible_chars = [
+            '\u200b', '\u200c', '\u200d', '\u200e', '\u200f',
+            '\u00a0', '\u2060', '\ufeff', '\u180e', '\u00ad',
+            '\u034f', '\u115f', '\u1160', '\u17b4', '\u17b5',
+            '\u3164', '\u2800',
+        ]
+        if any(c in after.content for c in invisible_chars):
+            violation = True
+
+    if violation:
+        await after.delete()
+        print(f"[nocaps] Deleted edited violating message from {after.author}.")
+        try:
+            until = datetime.now(timezone.utc) + timedelta(seconds=10)
+            await after.author.timeout(until)
+            print(f"[nocaps] Timed out {after.author} for 10 seconds.")
+        except Exception as e:
+            print(f"[nocaps] Could not timeout {after.author}: {e}")
     if user.bot:
         return
     if not no_caps_enabled:
