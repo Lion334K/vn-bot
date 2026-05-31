@@ -44,6 +44,7 @@ media_loop_task    = None
 media_queue        = []
 welcome_message_log: dict = {}
 no_caps_enabled: bool = False
+nocaps_immune: set = set()  # user IDs exempt from no-caps rules
 
 # ───────────────────────────────────────────────
 #  BUMP HELPERS
@@ -239,7 +240,7 @@ async def on_message(message: discord.Message):
     print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
 
     # ── No caps / no stickers / no emoji enforcement ──
-    if no_caps_enabled and not message.author.bot:
+    if no_caps_enabled and not message.author.bot and message.author.id not in nocaps_immune:
         if hasattr(message.channel, 'category_id') and message.channel.category_id == NO_CAPS_CATEGORY_ID:
             violation = False
             if message.stickers:
@@ -397,6 +398,8 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
         return
     if not no_caps_enabled:
         return
+    if user.id in nocaps_immune:
+        return
     if hasattr(reaction.message.channel, 'category_id') and reaction.message.channel.category_id == NO_CAPS_CATEGORY_ID:
         try:
             await reaction.remove(user)
@@ -415,6 +418,20 @@ async def no_caps(interaction: discord.Interaction):
     no_caps_enabled = not no_caps_enabled
     state = "enabled ✅" if no_caps_enabled else "disabled 🛑"
     await interaction.response.send_message(f"No-caps mode {state}.", ephemeral=True)
+
+
+@bot.tree.command(name="addimmune", description="Make a user immune to no-caps rules.")
+@app_commands.checks.has_permissions(administrator=True)
+async def add_immune(interaction: discord.Interaction, user: discord.Member):
+    nocaps_immune.add(user.id)
+    await interaction.response.send_message(f"✅ **{user.display_name}** is now immune to no-caps rules.", ephemeral=True)
+
+
+@bot.tree.command(name="removeimmune", description="Remove a user's immunity to no-caps rules.")
+@app_commands.checks.has_permissions(administrator=True)
+async def remove_immune(interaction: discord.Interaction, user: discord.Member):
+    nocaps_immune.discard(user.id)
+    await interaction.response.send_message(f"✅ **{user.display_name}** is no longer immune.", ephemeral=True)
 
 
 # ───────────────────────────────────────────────
