@@ -22,9 +22,23 @@ ANNOUNCE_SOURCE_CHANNEL_ID = 1489993668126572545
 EMBED_POOL_CHANNEL_ID      = 1501344668242280559
 MIRROR_SOURCE_CHANNEL_ID   = 1489996127347413114
 MIRROR_TARGET_CHANNEL_ID   = 1488485721877643314
+NO_CAPS_CATEGORY_ID        = 1381768081428185288
 
-NO_CAPS_CATEGORY_ID = 1381768081428185288  # no caps or stickers allowed in this category
+WELCOME_MESSAGE = "Aramıza yeni biri katıldı! Hoşgeldin {member} 🥹"
 BUMP_MESSAGE    = "Buuuuuump"
+
+# Allowed characters in no-caps category (English + Turkish + punctuation/numbers)
+ALLOWED_CHARS = re.compile(
+    r'^[a-zA-Z0-9çÇğĞıİöÖşŞüÜ\s\!\?\.\,\:\;\-\_\'\"\(\)\[\]\{\}'
+    r'\/\\\|\@\#\$\%\&\*\+\=\~\`\<\>\^\n\r\t]*$'
+)
+
+INVISIBLE_CHARS = [
+    '\u200b', '\u200c', '\u200d', '\u200e', '\u200f',
+    '\u00a0', '\u2060', '\ufeff', '\u180e', '\u00ad',
+    '\u034f', '\u115f', '\u1160', '\u17b4', '\u17b5',
+    '\u3164', '\u2800',
+]
 
 # ───────────────────────────────────────────────
 #  BOT SETUP
@@ -44,7 +58,46 @@ media_loop_task    = None
 media_queue        = []
 welcome_message_log: dict = {}
 no_caps_enabled: bool = False
-nocaps_immune: set = set()  # user IDs exempt from no-caps rules
+nocaps_immune: set = set()
+
+# ───────────────────────────────────────────────
+#  NO-CAPS HELPERS
+# ───────────────────────────────────────────────
+
+def check_violation(content: str, stickers) -> bool:
+    if stickers:
+        return True
+    if not content or not content.strip():
+        return True
+    if content != content.lower():
+        return True
+    has_unicode_emoji = bool(re.search(
+        u"[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
+        u"\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF"
+        u"\U00002702-\U000027B0\U000024C2-\U0001F251"
+        u"\U0001f926-\U0001f937\U00010000-\U0010ffff"
+        u"\u2640-\u2642\u2600-\u2B55\u200d\u23cf"
+        u"\u23e9\u231a\ufe0f\u3030]+", content))
+    has_custom_emoji = bool(re.search(r"<a?:\w+:\d+>", content))
+    if has_unicode_emoji or has_custom_emoji:
+        return True
+    if any(c in content for c in INVISIBLE_CHARS):
+        return True
+    if not ALLOWED_CHARS.match(content):
+        return True
+    return False
+
+
+async def enforce_violation(message: discord.Message):
+    await message.delete()
+    print(f"[nocaps] Deleted violating message from {message.author}.")
+    try:
+        until = datetime.now(timezone.utc) + timedelta(seconds=10)
+        await message.author.timeout(until)
+        print(f"[nocaps] Timed out {message.author} for 10 seconds.")
+    except Exception as e:
+        print(f"[nocaps] Could not timeout {message.author}: {e}")
+
 
 # ───────────────────────────────────────────────
 #  BUMP HELPERS
@@ -107,7 +160,7 @@ async def post_random_media():
             print("[random_media] Queue empty, rebuilding...")
             media_queue = await get_media_queue()
         if not media_queue:
-            print("[random_media] No images/gifs found in pool channel.")
+            print("[random_media] No media found in pool channel.")
             return
         chosen_msg, chosen_media = media_queue.pop(0)
         attachment = random.choice(chosen_media)
@@ -175,7 +228,7 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
-    # ── Auto-restart bump reminder ──
+    # Auto-restart bump reminder
     try:
         bump_channel = bot.get_channel(BUMP_CHANNEL_ID)
         if bump_channel:
@@ -190,12 +243,10 @@ async def on_ready():
                 else:
                     print("[bump] Time already passed, sending reminder now.")
                     bump_task = asyncio.ensure_future(schedule_bump_in(0))
-            else:
-                print("[bump] No previous bump bot message found.")
     except Exception as e:
         print(f"[bump] Error resuming bump timer: {e}")
 
-    # ── Auto-start random media ──
+    # Auto-start random media
     if not media_loop_running:
         media_loop_running = True
         media_loop_task = asyncio.ensure_future(run_media_loop())
@@ -239,46 +290,11 @@ async def on_message(message: discord.Message):
 
     print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
 
-    # ── No caps / no stickers / no emoji enforcement ──
+    # ── No caps / no stickers / no emoji / no foreign chars enforcement ──
     if no_caps_enabled and not message.author.bot and message.author.id not in nocaps_immune:
         if hasattr(message.channel, 'category_id') and message.channel.category_id == NO_CAPS_CATEGORY_ID:
-            violation = False
-            if message.stickers:
-                violation = True
-            # Catch empty or whitespace-only messages
-            if not message.content or not message.content.strip():
-                violation = True
-            if message.content:
-                if message.content != message.content.lower():
-                    violation = True
-                has_unicode_emoji = bool(re.search(
-                    u"[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
-                    u"\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF"
-                    u"\U00002702-\U000027B0\U000024C2-\U0001F251"
-                    u"\U0001f926-\U0001f937\U00010000-\U0010ffff"
-                    u"\u2640-\u2642\u2600-\u2B55\u200d\u23cf"
-                    u"\u23e9\u231a\ufe0f\u3030]+", message.content))
-                has_custom_emoji = bool(re.search(r"<a?:\w+:\d+>", message.content))
-                if has_unicode_emoji or has_custom_emoji:
-                    violation = True
-                # Check for invisible/blank characters
-                invisible_chars = [
-                    '\u200b', '\u200c', '\u200d', '\u200e', '\u200f',
-                    '\u00a0', '\u2060', '\ufeff', '\u180e', '\u00ad',
-                    '\u034f', '\u115f', '\u1160', '\u17b4', '\u17b5',
-                    '\u3164', '\u2800',
-                ]
-                if any(c in message.content for c in invisible_chars):
-                    violation = True
-            if violation:
-                await message.delete()
-                print(f"[nocaps] Deleted violating message from {message.author}.")
-                try:
-                    until = datetime.now(timezone.utc) + timedelta(seconds=10)
-                    await message.author.timeout(until)
-                    print(f"[nocaps] Timed out {message.author} for 10 seconds.")
-                except Exception as e:
-                    print(f"[nocaps] Could not timeout {message.author}: {e}")
+            if check_violation(message.content, message.stickers):
+                await enforce_violation(message)
                 return
 
     # ── Media & file logger (all channels) ──
@@ -329,6 +345,35 @@ async def on_message(message: discord.Message):
             print("[bump] Timer reset by bump bot.")
 
     await bot.process_commands(message)
+
+
+@bot.event
+async def on_message_edit(before: discord.Message, after: discord.Message):
+    if not no_caps_enabled or after.author.bot:
+        return
+    if after.author.id in nocaps_immune:
+        return
+    if not hasattr(after.channel, 'category_id') or after.channel.category_id != NO_CAPS_CATEGORY_ID:
+        return
+    if check_violation(after.content, after.stickers):
+        await enforce_violation(after)
+
+
+@bot.event
+async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
+    if user.bot or not no_caps_enabled or user.id in nocaps_immune:
+        return
+    if hasattr(reaction.message.channel, 'category_id') and reaction.message.channel.category_id == NO_CAPS_CATEGORY_ID:
+        try:
+            await reaction.remove(user)
+            print(f"[nocaps] Removed reaction from {user}.")
+            member = reaction.message.guild.get_member(user.id)
+            if member:
+                until = datetime.now(timezone.utc) + timedelta(seconds=10)
+                await member.timeout(until)
+                print(f"[nocaps] Timed out {user} for 10 seconds.")
+        except Exception as e:
+            print(f"[nocaps] Could not remove reaction or timeout: {e}")
 
 
 # ───────────────────────────────────────────────
@@ -404,72 +449,7 @@ async def stop_media(interaction: discord.Interaction):
     await interaction.response.send_message("🛑 Stopped.", ephemeral=True)
 
 
-@bot.event
-async def on_message_edit(before: discord.Message, after: discord.Message):
-    if not no_caps_enabled or after.author.bot:
-        return
-    if after.author.id in nocaps_immune:
-        return
-    if not hasattr(after.channel, 'category_id') or after.channel.category_id != NO_CAPS_CATEGORY_ID:
-        return
-
-    violation = False
-
-    if after.stickers:
-        violation = True
-
-    if not after.content or not after.content.strip():
-        violation = True
-
-    if after.content:
-        if after.content != after.content.lower():
-            violation = True
-        has_unicode_emoji = bool(re.search(
-            u"[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
-            u"\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF"
-            u"\U00002702-\U000027B0\U000024C2-\U0001F251"
-            u"\U0001f926-\U0001f937\U00010000-\U0010ffff"
-            u"\u2640-\u2642\u2600-\u2B55\u200d\u23cf"
-            u"\u23e9\u231a\ufe0f\u3030]+", after.content))
-        has_custom_emoji = bool(re.search(r"<a?:\w+:\d+>", after.content))
-        if has_unicode_emoji or has_custom_emoji:
-            violation = True
-        invisible_chars = [
-            '\u200b', '\u200c', '\u200d', '\u200e', '\u200f',
-            '\u00a0', '\u2060', '\ufeff', '\u180e', '\u00ad',
-            '\u034f', '\u115f', '\u1160', '\u17b4', '\u17b5',
-            '\u3164', '\u2800',
-        ]
-        if any(c in after.content for c in invisible_chars):
-            violation = True
-
-    if violation:
-        await after.delete()
-        print(f"[nocaps] Deleted edited violating message from {after.author}.")
-        try:
-            until = datetime.now(timezone.utc) + timedelta(seconds=10)
-            await after.author.timeout(until)
-            print(f"[nocaps] Timed out {after.author} for 10 seconds.")
-        except Exception as e:
-            print(f"[nocaps] Could not timeout {after.author}: {e}")
-    if user.bot:
-        return
-    if not no_caps_enabled:
-        return
-    if user.id in nocaps_immune:
-        return
-    if hasattr(reaction.message.channel, 'category_id') and reaction.message.channel.category_id == NO_CAPS_CATEGORY_ID:
-        try:
-            await reaction.remove(user)
-            print(f"[nocaps] Removed reaction from {user}.")
-            until = datetime.now(timezone.utc) + timedelta(seconds=10)
-            await reaction.message.guild.get_member(user.id).timeout(until)
-            print(f"[nocaps] Timed out {user} for 10 seconds.")
-        except Exception as e:
-            print(f"[nocaps] Could not remove reaction or timeout: {e}")
-
-
-@bot.tree.command(name="nocaps", description="Toggle no-caps, no-stickers, no-emoji, no-reactions mode for the category.")
+@bot.tree.command(name="nocaps", description="Toggle no-caps, no-stickers, no-emoji, no-reactions, no-foreign-chars mode.")
 @app_commands.checks.has_permissions(administrator=True)
 async def no_caps(interaction: discord.Interaction):
     global no_caps_enabled
@@ -482,7 +462,7 @@ async def no_caps(interaction: discord.Interaction):
 @app_commands.checks.has_permissions(administrator=True)
 async def add_immune(interaction: discord.Interaction, user: discord.Member):
     nocaps_immune.add(user.id)
-    await interaction.response.send_message(f"✅ **{user.display_name}** is now immune to no-caps rules.", ephemeral=True)
+    await interaction.response.send_message(f"✅ **{user.display_name}** is now immune.", ephemeral=True)
 
 
 @bot.tree.command(name="removeimmune", description="Remove a user's immunity to no-caps rules.")
