@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 import asyncio
 import random
+import re
 import os
 from datetime import datetime, timezone, timedelta
 
@@ -32,6 +33,7 @@ BUMP_MESSAGE    = "Buuuuuump"
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
+intents.reactions = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -236,17 +238,32 @@ async def on_message(message: discord.Message):
 
     print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
 
-    # ── No caps / no stickers enforcement ──
+    # ── No caps / no stickers / no emoji enforcement ──
     if no_caps_enabled and not message.author.bot:
         if hasattr(message.channel, 'category_id') and message.channel.category_id == NO_CAPS_CATEGORY_ID:
             if message.stickers:
                 await message.delete()
                 print(f"[nocaps] Deleted sticker from {message.author}.")
                 return
-            if message.content and message.content != message.content.lower():
-                await message.delete()
-                print(f"[nocaps] Deleted caps message from {message.author}.")
-                return
+            if message.content:
+                # Check for caps
+                if message.content != message.content.lower():
+                    await message.delete()
+                    print(f"[nocaps] Deleted caps message from {message.author}.")
+                    return
+                # Check for unicode emoji or custom Discord emoji
+                has_unicode_emoji = bool(re.search(
+                    u"[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
+                    u"\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF"
+                    u"\U00002702-\U000027B0\U000024C2-\U0001F251"
+                    u"\U0001f926-\U0001f937\U00010000-\U0010ffff"
+                    u"\u2640-\u2642\u2600-\u2B55\u200d\u23cf"
+                    u"\u23e9\u231a\ufe0f\u3030]+", message.content))
+                has_custom_emoji = bool(re.search(r"<a?:\w+:\d+>", message.content))
+                if has_unicode_emoji or has_custom_emoji:
+                    await message.delete()
+                    print(f"[nocaps] Deleted emoji message from {message.author}.")
+                    return
 
     # ── Media & file logger (all channels) ──
     if not message.author.bot:
@@ -371,7 +388,18 @@ async def stop_media(interaction: discord.Interaction):
     await interaction.response.send_message("🛑 Stopped.", ephemeral=True)
 
 
-@bot.tree.command(name="nocaps", description="Toggle no-caps and no-stickers mode for the category.")
+@bot.event
+async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
+    if user.bot:
+        return
+    if not no_caps_enabled:
+        return
+    if hasattr(reaction.message.channel, 'category_id') and reaction.message.channel.category_id == NO_CAPS_CATEGORY_ID:
+        try:
+            await reaction.remove(user)
+            print(f"[nocaps] Removed reaction from {user} in category.")
+        except Exception as e:
+            print(f"[nocaps] Could not remove reaction: {e}")
 @app_commands.checks.has_permissions(administrator=True)
 async def no_caps(interaction: discord.Interaction):
     global no_caps_enabled
