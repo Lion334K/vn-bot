@@ -293,6 +293,10 @@ async def on_message(message: discord.Message):
     # ── No caps / no stickers / no emoji / no foreign chars enforcement ──
     if no_caps_enabled and not message.author.bot and message.author.id not in nocaps_immune:
         if hasattr(message.channel, 'category_id') and message.channel.category_id == NO_CAPS_CATEGORY_ID:
+            # Delete if no content, no attachments, no embeds (pure invisible/blank message)
+            if not message.content and not message.attachments and not message.embeds:
+                await enforce_violation(message)
+                return
             if check_violation(message.content, message.stickers):
                 await enforce_violation(message)
                 return
