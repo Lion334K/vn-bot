@@ -245,6 +245,9 @@ async def on_message(message: discord.Message):
             violation = False
             if message.stickers:
                 violation = True
+            # Catch empty or whitespace-only messages
+            if not message.content or not message.content.strip():
+                violation = True
             if message.content:
                 if message.content != message.content.lower():
                     violation = True
