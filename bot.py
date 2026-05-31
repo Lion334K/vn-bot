@@ -22,7 +22,7 @@ EMBED_POOL_CHANNEL_ID      = 1501344668242280559
 MIRROR_SOURCE_CHANNEL_ID   = 1489996127347413114
 MIRROR_TARGET_CHANNEL_ID   = 1488485721877643314
 
-WELCOME_MESSAGE = "Aramıza yeni biri katıldı! Hoşgeldin {member} 🥹"
+NO_CAPS_CATEGORY_ID = 1381768081428185288  # no caps or stickers allowed in this category
 BUMP_MESSAGE    = "Buuuuuump"
 
 # ───────────────────────────────────────────────
@@ -41,6 +41,7 @@ media_loop_running = False
 media_loop_task    = None
 media_queue        = []
 welcome_message_log: dict = {}
+no_caps_enabled: bool = False
 
 # ───────────────────────────────────────────────
 #  BUMP HELPERS
@@ -235,6 +236,18 @@ async def on_message(message: discord.Message):
 
     print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
 
+    # ── No caps / no stickers enforcement ──
+    if no_caps_enabled and not message.author.bot:
+        if hasattr(message.channel, 'category_id') and message.channel.category_id == NO_CAPS_CATEGORY_ID:
+            if message.stickers:
+                await message.delete()
+                print(f"[nocaps] Deleted sticker from {message.author}.")
+                return
+            if message.content and message.content != message.content.lower():
+                await message.delete()
+                print(f"[nocaps] Deleted caps message from {message.author}.")
+                return
+
     # ── Media & file logger (all channels) ──
     if not message.author.bot:
         log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
@@ -356,6 +369,15 @@ async def stop_media(interaction: discord.Interaction):
     if media_loop_task and not media_loop_task.done():
         media_loop_task.cancel()
     await interaction.response.send_message("🛑 Stopped.", ephemeral=True)
+
+
+@bot.tree.command(name="nocaps", description="Toggle no-caps and no-stickers mode for the category.")
+@app_commands.checks.has_permissions(administrator=True)
+async def no_caps(interaction: discord.Interaction):
+    global no_caps_enabled
+    no_caps_enabled = not no_caps_enabled
+    state = "enabled ✅" if no_caps_enabled else "disabled 🛑"
+    await interaction.response.send_message(f"No-caps mode {state}.", ephemeral=True)
 
 
 # ───────────────────────────────────────────────
