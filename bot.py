@@ -29,8 +29,8 @@ BUMP_MESSAGE    = "Buuuuuump"
 
 # Allowed characters in no-caps category (English + Turkish + punctuation/numbers)
 ALLOWED_CHARS = re.compile(
-    r'^[a-zA-Z0-9çÇğĞıİöÖşŞüÜ\s\!\?\.\,\:\;\-\_\'\"\(\)\[\]\{\}'
-    r'\/\\\|\@\#\$\%\&\*\+\=\~\`\<\>\^\n\r\t]*$'
+    r'^[a-zA-Z0-9çÇğĞıİöÖşŞüÜ\s\!\?\.\,\:\;\-\'\"\(\)\[\]\{\}'
+    r'\/\\\@\#\$\%\&\+\=\~\`\<\>\^\n\r\t]*$'
 )
 
 INVISIBLE_CHARS = [
@@ -76,7 +76,10 @@ def check_violation(content: str, stickers) -> bool:
     newline_count = content.count('\n')
     if newline_count > 3:
         return True
-    # Catch messages where actual non-whitespace content is tiny compared to total length
+    # Catch markdown invisible tricks like "_ _", "** **", "|| ||"
+    stripped_markdown = re.sub(r'[_*~`|]', '', content).strip()
+    if not stripped_markdown:
+        return True
     # e.g. "." + 200 spaces/newlines
     real_content = content.replace(' ', '').replace('\n', '').replace('\t', '').replace('\r', '')
     if len(content) > 20 and len(real_content) < 5:
