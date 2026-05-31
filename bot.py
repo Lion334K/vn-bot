@@ -241,17 +241,12 @@ async def on_message(message: discord.Message):
     # ── No caps / no stickers / no emoji enforcement ──
     if no_caps_enabled and not message.author.bot:
         if hasattr(message.channel, 'category_id') and message.channel.category_id == NO_CAPS_CATEGORY_ID:
+            violation = False
             if message.stickers:
-                await message.delete()
-                print(f"[nocaps] Deleted sticker from {message.author}.")
-                return
+                violation = True
             if message.content:
-                # Check for caps
                 if message.content != message.content.lower():
-                    await message.delete()
-                    print(f"[nocaps] Deleted caps message from {message.author}.")
-                    return
-                # Check for unicode emoji or custom Discord emoji
+                    violation = True
                 has_unicode_emoji = bool(re.search(
                     u"[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF"
                     u"\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF"
@@ -261,9 +256,17 @@ async def on_message(message: discord.Message):
                     u"\u23e9\u231a\ufe0f\u3030]+", message.content))
                 has_custom_emoji = bool(re.search(r"<a?:\w+:\d+>", message.content))
                 if has_unicode_emoji or has_custom_emoji:
-                    await message.delete()
-                    print(f"[nocaps] Deleted emoji message from {message.author}.")
-                    return
+                    violation = True
+            if violation:
+                await message.delete()
+                print(f"[nocaps] Deleted violating message from {message.author}.")
+                try:
+                    until = datetime.now(timezone.utc) + timedelta(seconds=10)
+                    await message.author.timeout(until)
+                    print(f"[nocaps] Timed out {message.author} for 10 seconds.")
+                except Exception as e:
+                    print(f"[nocaps] Could not timeout {message.author}: {e}")
+                return
 
     # ── Media & file logger (all channels) ──
     if not message.author.bot:
@@ -397,9 +400,12 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
     if hasattr(reaction.message.channel, 'category_id') and reaction.message.channel.category_id == NO_CAPS_CATEGORY_ID:
         try:
             await reaction.remove(user)
-            print(f"[nocaps] Removed reaction from {user} in category.")
+            print(f"[nocaps] Removed reaction from {user}.")
+            until = datetime.now(timezone.utc) + timedelta(seconds=10)
+            await reaction.message.guild.get_member(user.id).timeout(until)
+            print(f"[nocaps] Timed out {user} for 10 seconds.")
         except Exception as e:
-            print(f"[nocaps] Could not remove reaction: {e}")
+            print(f"[nocaps] Could not remove reaction or timeout: {e}")
 
 
 @bot.tree.command(name="nocaps", description="Toggle no-caps, no-stickers, no-emoji, no-reactions mode for the category.")
