@@ -258,6 +258,15 @@ async def on_message(message: discord.Message):
                 has_custom_emoji = bool(re.search(r"<a?:\w+:\d+>", message.content))
                 if has_unicode_emoji or has_custom_emoji:
                     violation = True
+                # Check for invisible/blank characters
+                invisible_chars = [
+                    '\u200b', '\u200c', '\u200d', '\u200e', '\u200f',
+                    '\u00a0', '\u2060', '\ufeff', '\u180e', '\u00ad',
+                    '\u034f', '\u115f', '\u1160', '\u17b4', '\u17b5',
+                    '\u3164', '\u2800',
+                ]
+                if any(c in message.content for c in invisible_chars):
+                    violation = True
             if violation:
                 await message.delete()
                 print(f"[nocaps] Deleted violating message from {message.author}.")
