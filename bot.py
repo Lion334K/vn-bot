@@ -69,6 +69,9 @@ def check_violation(content: str, stickers) -> bool:
         return True
     if not content or not content.strip():
         return True
+    # Catch messages that are only spaces or whitespace
+    if content.strip() == '' or all(c == ' ' or c == '\t' for c in content):
+        return True
     if content != content.lower():
         return True
     has_unicode_emoji = bool(re.search(
@@ -294,7 +297,7 @@ async def on_message(message: discord.Message):
     if no_caps_enabled and not message.author.bot and message.author.id not in nocaps_immune:
         if hasattr(message.channel, 'category_id') and message.channel.category_id == NO_CAPS_CATEGORY_ID:
             # Delete if no content, no attachments, no embeds (pure invisible/blank message)
-            if not message.content and not message.attachments and not message.embeds:
+            if (not message.content or not message.content.strip()) and not message.attachments and not message.embeds:
                 await enforce_violation(message)
                 return
             if check_violation(message.content, message.stickers):
