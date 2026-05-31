@@ -400,6 +400,9 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
             print(f"[nocaps] Removed reaction from {user} in category.")
         except Exception as e:
             print(f"[nocaps] Could not remove reaction: {e}")
+
+
+@bot.tree.command(name="nocaps", description="Toggle no-caps, no-stickers, no-emoji, no-reactions mode for the category.")
 @app_commands.checks.has_permissions(administrator=True)
 async def no_caps(interaction: discord.Interaction):
     global no_caps_enabled
