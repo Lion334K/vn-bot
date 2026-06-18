@@ -5,8 +5,10 @@ import asyncio
 import random
 import re
 import os
+import io
 import aiohttp
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time
+from PIL import Image
 
 # ───────────────────────────────────────────────
 #  CONFIGURATION
@@ -21,6 +23,10 @@ BUMP_BOT_ID                = 302050872383242240
 IMAGE_LOG_CHANNEL_ID       = 1381770621054091306
 ANNOUNCE_SOURCE_CHANNEL_ID = 1489993668126572545
 EMBED_POOL_CHANNEL_ID      = 1501344668242280559
+
+# Quiz Kanalları
+QUIZ_CHANNEL_ID            = 1517149813085311107
+QUIZ_LOG_CHANNEL_ID        = 1517151082529296444
 
 WELCOME_MESSAGE = "{member} aramıza katıldı fln filan iste 😒"
 BUMP_MESSAGE    = "buuuuuump"
@@ -42,6 +48,86 @@ media_loop_running = False
 media_loop_task    = None
 media_queue        = []
 welcome_message_log: dict = {}
+
+# Quiz State
+quiz_state = {
+    "active": False,
+    "vn_title": "",
+    "vn_alttitle": "",
+    "image_bytes": None,
+    "crop_center": (0.5, 0.5),
+    "rotation_angle": 0,
+    "zoom_factor": 0.2,  # Başlangıçta yakından başlar (0.2 = %20 alan)
+    "wrong_guesses": 0
+}
+
+# ───────────────────────────────────────────────
+#  QUIZ HELPERS & IMAGE PROCESSING
+# ───────────────────────────────────────────────
+
+def normalize_title(text: str) -> str:
+    """Küçük/büyük harf, boşluk ve özel karakter toleransı sağlar."""
+    if not text:
+        return ""
+    text = text.lower().strip()
+    return re.sub(r'[\s\-_:,\.\!\?\'"”“\(\)]', '', text)
+
+
+def generate_quiz_image(img_bytes: bytes, angle: int, zoom_factor: float, center_pct: tuple) -> io.BytesIO:
+    """Görsele gri filtre, rotasyon ve zoom uygulayarak işler."""
+    img = Image.open(io.BytesIO(img_bytes))
+    img = img.convert("L")  # Gri filtre (Grayscale)
+    
+    orig_w, orig_h = img.size
+    cx, cy = center_pct
+    
+    # Zoom alanı hesaplama (Crop)
+    crop_w = max(20, int(orig_w * zoom_factor))
+    crop_h = max(20, int(orig_h * zoom_factor))
+    
+    center_x = int(orig_w * cx)
+    center_y = int(orig_h * cy)
+    
+    left = max(0, min(center_x - crop_w // 2, orig_w - crop_w))
+    top = max(0, min(center_y - crop_h // 2, orig_h - crop_h))
+    right = left + crop_w
+    bottom = top + crop_h
+    
+    img = img.crop((left, top, right, bottom))
+    img = img.rotate(angle, expand=True)  # Rastgele rotasyon
+    img = img.resize((orig_w, orig_h), Image.Resampling.LANCZOS)  # Tekrar orijinal boyuta esnetme
+    
+    out_bytes = io.BytesIO()
+    img.save(out_bytes, format="PNG")
+    out_bytes.seek(0)
+    return out_bytes
+
+
+async def fetch_top_vns() -> list:
+    """VNDB API v2 üzerinden popülerlik sırasına göre ilk 50 VN'yi çeker."""
+    url = "https://api.vndb.org/v2/vn"
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "DiscordVNQuizBot/1.0"
+    }
+    payload = {
+        "filters": ["and", ["id", ">=", "v1"]],
+        "fields": "title, alttitle, image.url",
+        "sort": "popularity",
+        "reverse": True,
+        "results": 50
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("results", [])
+                print(f"[quiz] VNDB API Error: {resp.status}")
+                return []
+    except Exception as e:
+        print(f"[quiz] Connection Error: {e}")
+        return []
 
 # ───────────────────────────────────────────────
 #  BUMP HELPERS
@@ -100,7 +186,6 @@ async def get_media_queue() -> list:
 async def post_random_media():
     global media_queue
     try:
-        import io
         welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
         if welcome_channel is None:
             print("[random_media] ERROR: Welcome channel not found.")
@@ -176,6 +261,74 @@ async def run_media_loop(initial_delay: float = 0):
 
 
 # ───────────────────────────────────────────────
+#  SCHEDULED QUIZ TASK (TSİ 10:00 & 20:00)
+# ───────────────────────────────────────────────
+
+# TSİ (UTC+3) 10:00 ve 20:00 saatleri, UTC olarak sırasıyla 07:00 ve 17:00'ye denk gelir.
+quiz_times = [
+    time(hour=7, minute=0, tzinfo=timezone.utc),
+    time(hour=17, minute=0, tzinfo=timezone.utc)
+]
+
+@tasks.loop(time=quiz_times)
+async def scheduled_quiz():
+    global quiz_state
+    quiz_channel = bot.get_channel(QUIZ_CHANNEL_ID)
+    if not quiz_channel:
+        print("[quiz] HATA: Quiz kanalı bulunamadı.")
+        return
+
+    # Eğer bir sonraki soru zamanı geldiyse ve önceki soru hala bilinemediyse cevabı açıkla
+    if quiz_state["active"]:
+        await quiz_channel.send(f"⏰ **Süre doldu!** Kimse doğru yanıtı veremedi. Cevap: **{quiz_state['vn_title']}** olacaktı.")
+        quiz_state["active"] = False
+
+    vns = await fetch_top_vns()
+    valid_vns = [v for v in vns if v.get("image") and v.get("image").get("url")]
+    
+    if not valid_vns:
+        print("[quiz] HATA: Geçerli resme sahip VN listesi alınamadı.")
+        return
+
+    chosen_vn = random.choice(valid_vns)
+    title = chosen_vn.get("title")
+    alttitle = chosen_vn.get("alttitle", "")
+    img_url = chosen_vn.get("image").get("url")
+
+    # Resmi indir
+    async with aiohttp.ClientSession() as session:
+        async with session.get(img_url) as resp:
+            if resp.status != 200:
+                print("[quiz] HATA: Kapak resmi indirilemedi.")
+                return
+            img_bytes = await resp.read()
+
+    # Quiz durumunu ayarla
+    quiz_state["active"] = True
+    quiz_state["vn_title"] = title
+    quiz_state["vn_alttitle"] = alttitle
+    quiz_state["image_bytes"] = img_bytes
+    quiz_state["crop_center"] = (random.uniform(0.3, 0.7), random.uniform(0.3, 0.7)) # Sabit bir merkez seç ki dışa doğru düzgün zoomlasın
+    quiz_state["rotation_angle"] = random.randint(35, 325)
+    quiz_state["zoom_factor"] = 0.20
+    quiz_state["wrong_guesses"] = 0
+
+    # Görseli oluştur ve gönder
+    quiz_img = generate_quiz_image(
+        img_bytes, 
+        quiz_state["rotation_angle"], 
+        quiz_state["zoom_factor"], 
+        quiz_state["crop_center"]
+    )
+
+    await quiz_channel.send(
+        "🎮 **Yeni Soru!** Bu hangi seri?",
+        file=discord.File(fp=quiz_img, filename="quiz_question.png")
+    )
+    print(f"[quiz] Soru hazırlandı: {title}")
+
+
+# ───────────────────────────────────────────────
 #  EVENTS
 # ───────────────────────────────────────────────
 
@@ -222,6 +375,11 @@ async def on_ready():
         media_loop_task = asyncio.ensure_future(run_media_loop(initial_delay=30 * 60))
         print("[random_media] Auto-started on ready (first post in 30 minutes).")
 
+    # Auto-start Quiz Task
+    if not scheduled_quiz.is_running():
+        scheduled_quiz.start()
+        print("[quiz] Zamanlanmış quiz döngüsü başlatıldı (10:00 & 20:00 TSİ).")
+
 
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -256,9 +414,44 @@ async def on_member_remove(member: discord.Member):
 
 @bot.event
 async def on_message(message: discord.Message):
-    global bump_task
+    global bump_task, quiz_state
 
     print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
+
+    # ── Quiz Yanıt Kontrolü ──
+    if quiz_state["active"] and message.channel.id == QUIZ_CHANNEL_ID and not message.author.bot:
+        guess_normalized = normalize_title(message.content)
+        title_normalized = normalize_title(quiz_state["vn_title"])
+        alttitle_normalized = normalize_title(quiz_state["vn_alttitle"])
+
+        # Doğru tahmin kontrolü
+        if (guess_normalized == title_normalized) or (alttitle_normalized and guess_normalized == alttitle_normalized):
+            quiz_state["active"] = False
+            await message.channel.send(f"{message.author.mention} doğru bildi! +1 puan")
+            
+            # Skor kanalına log gönderme
+            log_channel = bot.get_channel(QUIZ_LOG_CHANNEL_ID)
+            if log_channel:
+                await log_channel.send(f"{message.author.name} +1 puan")
+        else:
+            # Yanlış tahmin durumunda çarpı emojisi bas
+            await message.add_reaction("❌")
+            quiz_state["wrong_guesses"] += 1
+            
+            # Her 3 yanlış bilmede resmi biraz daha dışa doğru zoomla (uzaklaştır)
+            if quiz_state["wrong_guesses"] % 3 == 0 and quiz_state["zoom_factor"] < 1.0:
+                quiz_state["zoom_factor"] = min(1.0, quiz_state["zoom_factor"] + 0.25)
+                
+                clue_img = generate_quiz_image(
+                    quiz_state["image_bytes"],
+                    quiz_state["rotation_angle"],
+                    quiz_state["zoom_factor"],
+                    quiz_state["crop_center"]
+                )
+                await message.channel.send(
+                    "🔍 **İpucu!** 3 yanlış tahminden sonra resim biraz daha dışa doğru zoomlandı:",
+                    file=discord.File(fp=clue_img, filename="quiz_clue.png")
+                )
 
     # ── Media & file logger (all channels) ──
     if not message.author.bot:
