@@ -5,6 +5,7 @@ import asyncio
 import random
 import re
 import os
+import aiohttp
 from datetime import datetime, timezone, timedelta
 
 # ───────────────────────────────────────────────
@@ -20,11 +21,9 @@ BUMP_BOT_ID                = 302050872383242240
 IMAGE_LOG_CHANNEL_ID       = 1381770621054091306
 ANNOUNCE_SOURCE_CHANNEL_ID = 1489993668126572545
 EMBED_POOL_CHANNEL_ID      = 1501344668242280559
-MIRROR_SOURCE_CHANNEL_ID   = 1489996127347413114
-MIRROR_TARGET_CHANNEL_ID   = 1488485721877643314
 
-WELCOME_MESSAGE = "Aramıza yeni biri katıldı! Hoşgeldin {member} 🥹"
-BUMP_MESSAGE    = "Buuuuuump"
+WELCOME_MESSAGE = "{member} aramıza katıldı fln filan iste 😒"
+BUMP_MESSAGE    = "buuuuuump"
 
 # ───────────────────────────────────────────────
 #  BOT SETUP
@@ -83,9 +82,13 @@ async def get_media_queue() -> list:
         image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".webm")
         valid = []
         async for msg in pool_channel.history(limit=200):
-            media = [a for a in msg.attachments if a.filename.lower().endswith(image_extensions)]
+            media = [
+                (a.url, a.filename)
+                for a in msg.attachments
+                if a.filename.lower().endswith(image_extensions)
+            ]
             if media:
-                valid.append((msg, media))
+                valid.append((msg.author.name, media))
         random.shuffle(valid)
         print(f"[random_media] Built queue with {len(valid)} items.")
         return valid
@@ -97,6 +100,7 @@ async def get_media_queue() -> list:
 async def post_random_media():
     global media_queue
     try:
+        import io
         welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
         if welcome_channel is None:
             print("[random_media] ERROR: Welcome channel not found.")
@@ -107,11 +111,17 @@ async def post_random_media():
         if not media_queue:
             print("[random_media] No media found in pool channel.")
             return
-        chosen_msg, chosen_media = media_queue.pop(0)
-        attachment = random.choice(chosen_media)
+        author_name, media_list = media_queue.pop(0)
+        url, filename = random.choice(media_list)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    print(f"[random_media] Failed to fetch media: HTTP {resp.status}")
+                    return
+                data = await resp.read()
         await welcome_channel.send(
-            f"**{chosen_msg.author.name}**",
-            file=await attachment.to_file()
+            f"**{author_name}**",
+            file=discord.File(fp=io.BytesIO(data), filename=filename)
         )
         print(f"[random_media] Posted. {len(media_queue)} remaining in queue.")
     except Exception as e:
@@ -134,7 +144,16 @@ async def get_active_user_count() -> int:
         return 0
 
 
-async def run_media_loop():
+async def run_media_loop(initial_delay: float = 0):
+    global media_loop_running
+    try:
+        if initial_delay > 0:
+            print(f"[random_media] Waiting {int(initial_delay // 60)} minutes before first post.")
+            await asyncio.sleep(initial_delay)
+    except asyncio.CancelledError:
+        print("[random_media] Loop cancelled during initial delay.")
+        return
+
     while media_loop_running:
         try:
             active_users = await get_active_user_count()
@@ -173,6 +192,12 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
+    # Send "p" to image log channel on restart
+    log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
+    if log_channel:
+        await log_channel.send("p")
+        print("[restart] Sent 'p' to image log channel.")
+
     # Auto-restart bump reminder
     try:
         bump_channel = bot.get_channel(BUMP_CHANNEL_ID)
@@ -191,11 +216,11 @@ async def on_ready():
     except Exception as e:
         print(f"[bump] Error resuming bump timer: {e}")
 
-    # Auto-start random media
+    # Auto-start random media with 30 min initial delay
     if not media_loop_running:
         media_loop_running = True
-        media_loop_task = asyncio.ensure_future(run_media_loop())
-        print("[random_media] Auto-started on ready.")
+        media_loop_task = asyncio.ensure_future(run_media_loop(initial_delay=30 * 60))
+        print("[random_media] Auto-started on ready (first post in 30 minutes).")
 
 
 @bot.event
@@ -221,7 +246,7 @@ async def on_member_remove(member: discord.Member):
         return
     try:
         msg = await channel.fetch_message(welcome_message_log[member.id])
-        await msg.edit(content="geri gitti... 🥺")
+        await msg.edit(content=f"{member.mention} geri gitti... 🥺")
         print(f"[welcome] Edited welcome message for {member}.")
     except Exception as e:
         print(f"[welcome] Could not edit message: {e}")
@@ -260,18 +285,6 @@ async def on_message(message: discord.Message):
                     await welcome_channel.send(embed=embed)
             print(f"[announce] Mirrored message from {message.author} to welcome channel.")
 
-    # ── Cross-server mirror ──
-    if message.channel.id == MIRROR_SOURCE_CHANNEL_ID and message.author != bot.user:
-        target = bot.get_channel(MIRROR_TARGET_CHANNEL_ID)
-        if target:
-            if message.content:
-                await target.send(message.content)
-            for attachment in message.attachments:
-                await target.send(file=await attachment.to_file())
-            print(f"[mirror] Mirrored message from {message.author}.")
-        else:
-            print(f"[mirror] ERROR: Target channel not found.")
-
     # ── Bump reminder ──
     if message.channel.id == BUMP_CHANNEL_ID:
         if message.author == bot.user and message.content == BUMP_MESSAGE:
@@ -302,27 +315,6 @@ async def set_welcome(interaction: discord.Interaction, message: str):
 async def test_welcome(interaction: discord.Interaction):
     msg = WELCOME_MESSAGE.replace("{member}", interaction.user.mention)
     await interaction.response.send_message(f"**Önizleme:**\n{msg}", ephemeral=True)
-
-
-@bot.tree.command(name="testmirror", description="Copies the last message from the source channel to the target channel.")
-@app_commands.checks.has_permissions(administrator=True)
-async def test_mirror(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    source = bot.get_channel(MIRROR_SOURCE_CHANNEL_ID)
-    target = bot.get_channel(MIRROR_TARGET_CHANNEL_ID)
-    if source is None or target is None:
-        await interaction.followup.send("❌ Channel not found.", ephemeral=True)
-        return
-    messages = [msg async for msg in source.history(limit=1)]
-    if not messages:
-        await interaction.followup.send("❌ No messages found.", ephemeral=True)
-        return
-    last = messages[0]
-    if last.content:
-        await target.send(last.content)
-    for attachment in last.attachments:
-        await target.send(file=await attachment.to_file())
-    await interaction.followup.send(f"✅ Mirrored to <#{MIRROR_TARGET_CHANNEL_ID}>.", ephemeral=True)
 
 
 @bot.tree.command(name="setbump", description="Bump hatırlatma mesajını değiştir.")
