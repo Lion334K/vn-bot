@@ -95,7 +95,7 @@ def generate_quiz_image(img_bytes: bytes, angle: int, zoom_factor: float, center
     
     img = img.crop((left, top, right, bottom))
     img = img.rotate(angle, expand=True)  # Rastgele rotasyon
-    img = img.resize((orig_w, orig_h), Image.Resampling.LANCZOS)  # Orijinal boyuta esnetme
+    img = img.resize((orig_w, orig_h), Image.Resampling.LANCZOS)  # Tekrar orijinal boyuta esnetme
     
     out_bytes = io.BytesIO()
     img.save(out_bytes, format="PNG")
@@ -104,26 +104,33 @@ def generate_quiz_image(img_bytes: bytes, angle: int, zoom_factor: float, center
 
 
 async def fetch_top_vns() -> list:
-    """VNDB API v2 üzerinden popülerlik sırasına göre ilk 50 VN'yi çeker."""
-    url = "https://api.vndb.org/v2/vn"
+    """VNDB Kana API üzerinden popülerlik sırasına göre VN'leri çeker."""
+    url = "https://api.vndb.org/kana/vn"
     headers = {
         "Content-Type": "application/json",
-        "User-Agent": "DiscordVNQuizBot/1.0"
+        "Accept": "application/json",
+        "User-Agent": "DiscordVNQuizBot/1.0 (https://github.com/)" # User-Agent zorunlu
     }
     payload = {
-        "filters": ["and", ["id", ">=", "v1"]],
+        "filters": ["id", ">=", "v1"],
         "fields": "title, alttitle, image.url",
-        "sort": "popularity",
+        "sort": "rating",
         "reverse": True,
         "results": 50
     }
+    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
-                    return data.get("results", [])
-                print(f"[quiz] VNDB API Error: {resp.status}")
+                     # Yanıtın JSON olup olmadığını kontrol ediyoruz, HTML gelmesin diye.
+                    if "application/json" in resp.headers.get("Content-Type", ""):
+                        data = await resp.json()
+                        return data.get("results", [])
+                    else:
+                        print(f"[quiz] VNDB API Error: JSON bekleniyordu ancak {resp.headers.get('Content-Type')} alındı.")
+                        return []
+                print(f"[quiz] VNDB API Error HTTP {resp.status}")
                 return []
     except Exception as e:
         print(f"[quiz] Connection Error: {e}")
@@ -322,7 +329,6 @@ async def run_media_loop(initial_delay: float = 0):
 #  SCHEDULED QUIZ TASK (TSİ 10:00 & 20:00)
 # ───────────────────────────────────────────────
 
-# TSİ (UTC+3) 10:00 ve 20:00 saatleri, UTC olarak sırasıyla 07:00 ve 17:00'ye denk gelir.
 quiz_times = [
     time(hour=7, minute=0, tzinfo=timezone.utc),
     time(hour=17, minute=0, tzinfo=timezone.utc)
@@ -350,7 +356,7 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
-    # Restart olunca image log kanalına "p" atar
+    # Send "p" to image log channel on restart
     log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
     if log_channel:
         await log_channel.send("p")
@@ -374,12 +380,16 @@ async def on_ready():
     except Exception as e:
         print(f"[bump] Error resuming bump timer: {e}")
 
-    # Auto-start random media (30 dk gecikmeli)
+    # Auto-start random media with 30 min initial delay
     if not media_loop_running:
         media_loop_running = True
         media_loop_task = asyncio.ensure_future(run_media_loop(initial_delay=30 * 60))
         print("[random_media] Auto-started on ready (first post in 30 minutes).")
 
+    # Auto-start Quiz Task
+    if not scheduled_quiz.is_running():
+        scheduled_quiz.start()
+        print("[quiz] Zamanlanmış quiz döngüsü başlatıldı (10:00 & 20:00 TSİ).")
 
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -409,13 +419,14 @@ async def on_member_remove(member: discord.Member):
     except Exception as e:
         print(f"[welcome] Could not edit message: {e}")
     finally:
-        if member.id in welcome_message_log:
-            del welcome_message_log[member.id]
+        del welcome_message_log[member.id]
 
 
 @bot.event
 async def on_message(message: discord.Message):
     global bump_task, quiz_state
+
+    print(f"[on_message] Channel: {message.channel.id} | Author: {message.author} | Content: {message.content[:50]}")
 
     # ── Quiz Yanıt Kontrolü ──
     if quiz_state["active"] and message.channel.id == QUIZ_CHANNEL_ID and not message.author.bot:
@@ -477,84 +488,4 @@ async def on_message(message: discord.Message):
                     await welcome_channel.send(embed=embed)
             print(f"[announce] Mirrored message from {message.author} to welcome channel.")
 
-    # ── Bump reminder ──
-    if message.channel.id == BUMP_CHANNEL_ID:
-        if message.author == bot.user and message.content == BUMP_MESSAGE:
-            return
-        if message.author.id == BUMP_BOT_ID:
-            if bump_task and not bump_task.done():
-                bump_task.cancel()
-            bump_task = asyncio.ensure_future(schedule_bump())
-            print("[bump] Timer reset by bump bot.")
-
-    await bot.process_commands(message)
-
-
-# ───────────────────────────────────────────────
-#  SLASH COMMANDS
-# ───────────────────────────────────────────────
-
-@bot.tree.command(name="startquiz", description="Manuel olarak yeni bir quiz sorusu başlatır.")
-@app_commands.checks.has_permissions(administrator=True)
-async def start_quiz(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        await start_quiz_question()
-        await interaction.followup.send("✅ Yeni quiz sorusu başarıyla başlatıldı!", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Soru başlatılırken bir hata oluştu: {e}", ephemeral=True)
-
-
-@bot.tree.command(name="setwelcome", description="Hoşgeldin mesajını değiştir. {member} yeni üyeyi etiketler.")
-@app_commands.checks.has_permissions(administrator=True)
-async def set_welcome(interaction: discord.Interaction, message: str):
-    global WELCOME_MESSAGE
-    WELCOME_MESSAGE = message
-    await interaction.response.send_message(f"✅ Güncellendi:\n> {WELCOME_MESSAGE}", ephemeral=True)
-
-
-@bot.tree.command(name="testwelcome", description="Mevcut hoşgeldin mesajını önizle.")
-@app_commands.checks.has_permissions(administrator=True)
-async def test_welcome(interaction: discord.Interaction):
-    msg = WELCOME_MESSAGE.replace("{member}", interaction.user.mention)
-    await interaction.response.send_message(f"**Önizleme:**\n{msg}", ephemeral=True)
-
-
-@bot.tree.command(name="setbump", description="Bump hatırlatma mesajını değiştir.")
-@app_commands.checks.has_permissions(administrator=True)
-async def set_bump(interaction: discord.Interaction, message: str):
-    global BUMP_MESSAGE
-    BUMP_MESSAGE = message
-    await interaction.response.send_message(f"✅ Güncellendi:\n> {BUMP_MESSAGE}", ephemeral=True)
-
-
-@bot.tree.command(name="startmedia", description="Start posting random images/gifs based on chat activity.")
-@app_commands.checks.has_permissions(administrator=True)
-async def start_media(interaction: discord.Interaction):
-    global media_loop_running, media_loop_task
-    if media_loop_running:
-        await interaction.response.send_message("⚠️ Already running!", ephemeral=True)
-        return
-    media_loop_running = True
-    media_loop_task = asyncio.ensure_future(run_media_loop())
-    await interaction.response.send_message("✅ Started.", ephemeral=True)
-
-
-@bot.tree.command(name="stopmedia", description="Stop posting random images/gifs.")
-@app_commands.checks.has_permissions(administrator=True)
-async def stop_media(interaction: discord.Interaction):
-    global media_loop_running, media_loop_task
-    if not media_loop_running:
-        await interaction.response.send_message("⚠️ Not running.", ephemeral=True)
-        return
-    media_loop_running = False
-    if media_loop_task and not media_loop_task.done():
-        media_loop_task.cancel()
-    await interaction.response.send_message("🛑 Stopped.", ephemeral=True)
-
-
-# ───────────────────────────────────────────────
-#  RUN
-# ───────────────────────────────────────────────
-
-bot.run(TOKEN)
+    # ── Bump reminder
