@@ -7,7 +7,7 @@ import re
 import os
 import io
 import aiohttp
-from datetime import datetime, timezone, timedelta, time
+from datetime import datetime, timezone, timedelta
 from PIL import Image
 
 # ───────────────────────────────────────────────
@@ -57,8 +57,9 @@ quiz_state = {
     "image_bytes": None,
     "crop_center": (0.5, 0.5),
     "rotation_angle": 0,
-    "zoom_factor": 0.2,
-    "wrong_guesses": 0
+    "zoom_factor": 0.2,       # Başlangıç yakınlık oranı
+    "wrong_guesses": 0,
+    "skip_msg_id": None       # Üzerinde atlama emojisi olan mesajın ID'si
 }
 
 # ───────────────────────────────────────────────
@@ -112,7 +113,7 @@ async def fetch_top_vns() -> list:
         "fields": "title, alttitle, image.url",
         "sort": "rating",
         "reverse": True,
-        "results": 50
+        "results": 100  # İlk 100 Görsel Romanı çekecek şekilde güncellendi
     }
     
     try:
@@ -135,10 +136,6 @@ async def start_quiz_question():
     if not quiz_channel:
         print("[quiz] HATA: Quiz kanalı bulunamadı.")
         return
-
-    if quiz_state["active"]:
-        await quiz_channel.send(f"⏰ **Süre doldu / Yeni soru istendi!** Cevap: **{quiz_state['vn_title']}** olacaktı.")
-        quiz_state["active"] = False
 
     vns = await fetch_top_vns()
     valid_vns = [v for v in vns if v.get("image") and v.get("image").get("url")]
@@ -167,6 +164,7 @@ async def start_quiz_question():
     quiz_state["rotation_angle"] = random.randint(35, 325)
     quiz_state["zoom_factor"] = 0.20
     quiz_state["wrong_guesses"] = 0
+    quiz_state["skip_msg_id"] = None
 
     quiz_img = generate_quiz_image(
         img_bytes, 
@@ -180,6 +178,12 @@ async def start_quiz_question():
         file=discord.File(fp=quiz_img, filename="quiz_question.png")
     )
     print(f"[quiz] Soru hazırlandı: {title}")
+
+
+async def next_quiz_question_delay(delay: float = 5.0):
+    """Belirtilen saniye kadar bekleyip yeni soru tetikler."""
+    await asyncio.sleep(delay)
+    await start_quiz_question()
 
 # ───────────────────────────────────────────────
 #  BUMP HELPERS
@@ -294,25 +298,12 @@ async def run_media_loop(initial_delay: float = 0):
             await asyncio.sleep(60)
 
 # ───────────────────────────────────────────────
-#  SCHEDULED QUIZ TASK (TSİ 10:00 & 20:00)
-# ───────────────────────────────────────────────
-
-quiz_times = [
-    time(hour=7, minute=0, tzinfo=timezone.utc),
-    time(hour=17, minute=0, tzinfo=timezone.utc)
-]
-
-@tasks.loop(time=quiz_times)
-async def scheduled_quiz():
-    await start_quiz_question()
-
-# ───────────────────────────────────────────────
 #  EVENTS
 # ───────────────────────────────────────────────
 
 @bot.event
 async def on_ready():
-    global media_loop_running, media_loop_task, bump_task
+    global media_loop_running, media_loop_task, bump_task, quiz_state
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
     try:
         guild = discord.Object(id=GUILD_ID)
@@ -345,8 +336,11 @@ async def on_ready():
         media_loop_running = True
         media_loop_task = asyncio.ensure_future(run_media_loop(initial_delay=30 * 60))
 
-    if not scheduled_quiz.is_running():
-        scheduled_quiz.start()
+    # İlk quiz sorusunu bot açıldığında otomatik olarak başlatır
+    if not quiz_state["active"]:
+        asyncio.create_task(start_quiz_question())
+        print("[quiz] Sürekli döngü sistemi başlatıldı, ilk soru yükleniyor.")
+
 
 @bot.event
 async def on_member_join(member: discord.Member):
@@ -355,6 +349,7 @@ async def on_member_join(member: discord.Member):
         msg = WELCOME_MESSAGE.replace("{member}", member.mention)
         sent = await channel.send(msg)
         welcome_message_log[member.id] = sent.id
+
 
 @bot.event
 async def on_member_remove(member: discord.Member):
@@ -370,6 +365,7 @@ async def on_member_remove(member: discord.Member):
         finally:
             del welcome_message_log[member.id]
 
+
 @bot.event
 async def on_message(message: discord.Message):
     global bump_task, quiz_state
@@ -382,27 +378,38 @@ async def on_message(message: discord.Message):
 
         if (guess_normalized == title_normalized) or (alttitle_normalized and guess_normalized == alttitle_normalized):
             quiz_state["active"] = False
-            await message.channel.send(f"{message.author.mention} doğru bildi! +1 puan")
+            await message.channel.send(f"🎉 {message.author.mention} doğru bildi! Doğru Cevap: **{quiz_state['vn_title']}** (+1 puan)")
             
             log_channel = bot.get_channel(QUIZ_LOG_CHANNEL_ID)
             if log_channel:
                 await log_channel.send(f"{message.author.name} +1 puan")
+            
+            # Doğru bilindiği için 5 saniye sonra yeni soruya geçer
+            asyncio.create_task(next_quiz_question_delay(5.0))
         else:
             await message.add_reaction("❌")
             quiz_state["wrong_guesses"] += 1
             
+            # Her 3 yanlış bilmede resmi biraz daha dışa zoomla (Miktar 0.25'ten 0.15'e düşürüldü)
             if quiz_state["wrong_guesses"] % 3 == 0 and quiz_state["zoom_factor"] < 1.0:
-                quiz_state["zoom_factor"] = min(1.0, quiz_state["zoom_factor"] + 0.25)
+                quiz_state["zoom_factor"] = min(1.0, quiz_state["zoom_factor"] + 0.15)
+                
                 clue_img = generate_quiz_image(
                     quiz_state["image_bytes"],
                     quiz_state["rotation_angle"],
                     quiz_state["zoom_factor"],
                     quiz_state["crop_center"]
                 )
-                await message.channel.send(
+                clue_msg = await message.channel.send(
                     "🔍 **İpucu!** Resim biraz uzaklaştırıldı:",
                     file=discord.File(fp=clue_img, filename="quiz_clue.png")
                 )
+                
+                # Resim tamamen dışa zoomlandıysa (1.0 olduysa) atlama emojisi (⏭️) ekle
+                if quiz_state["zoom_factor"] >= 1.0:
+                    await clue_msg.add_reaction("⏭️")
+                    quiz_state["skip_msg_id"] = clue_msg.id
+                    await message.channel.send("📢 **Resim tamamen açıldı!** Soruyu atlamak için aşağıdaki ⏭️ emojisine tıklayabilirsiniz (5 kişi gerekli).")
 
     if not message.author.bot:
         log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
@@ -435,6 +442,32 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
+
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    """Atlama emojisine (⏭️) basıldığında tepkileri kontrol eder."""
+    global quiz_state
+    if quiz_state["active"] and quiz_state["skip_msg_id"] == payload.message_id:
+        if str(payload.emoji) == "⏭️" and payload.user_id != bot.user.id:
+            channel = bot.get_channel(payload.channel_id)
+            if not channel:
+                return
+            
+            message = await channel.fetch_message(payload.message_id)
+            reaction = discord.utils.get(message.reactions, emoji="⏭️")
+            
+            if reaction:
+                # Botun kendi koyduğu tepki + 5 üye = Toplam en az 6 tepki olmalı
+                if reaction.count >= 6:
+                    quiz_state["active"] = False
+                    quiz_state["skip_msg_id"] = None
+                    
+                    await channel.send(f"⏭️ **Oylama başarılı! Soru atlandı.** Doğru cevap: **{quiz_state['vn_title']}** olacaktı.")
+                    
+                    # Soru atlandığı için 5 saniye sonra yeni soruya geçer
+                    asyncio.create_task(next_quiz_question_delay(5.0))
+
+
 # ───────────────────────────────────────────────
 #  SLASH COMMANDS
 # ───────────────────────────────────────────────
@@ -442,8 +475,14 @@ async def on_message(message: discord.Message):
 @bot.tree.command(name="startquiz", description="Manuel olarak yeni bir quiz sorusu başlatır.")
 @app_commands.checks.has_permissions(administrator=True)
 async def start_quiz(interaction: discord.Interaction):
+    global quiz_state
     await interaction.response.defer(ephemeral=True)
     try:
+        if quiz_state["active"]:
+            quiz_channel = bot.get_channel(QUIZ_CHANNEL_ID)
+            if quiz_channel:
+                await quiz_channel.send(f"⏰ **Yeni soru istendi!** Eski soru kapatıldı. Cevap: **{quiz_state['vn_title']}** olacaktı.")
+        
         await start_quiz_question()
         await interaction.followup.send("✅ Yeni quiz sorusu başarıyla başlatıldı!", ephemeral=True)
     except Exception as e:
