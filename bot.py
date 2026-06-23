@@ -476,7 +476,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         # ⏭️ Atlama Kontrolü (3 Kullanıcı = Toplam 4 oy bot dahil)
         elif str(payload.emoji) == "⏭️":
             reaction = discord.utils.get(message.reactions, emoji="⏭️")
-            if reaction and reaction.count >= 4:
+            if reaction and reaction.count >= 3:
                 quiz_state["active"] = False
                 quiz_state["current_msg_id"] = None
                 
