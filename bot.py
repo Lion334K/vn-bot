@@ -65,10 +65,10 @@ quiz_state = {
 # ───────────────────────────────────────────────
 
 def normalize_title(text: str) -> str:
+    """Tüm boşlukları ve noktalama işaretlerini silip sadece harf ve rakamları bırakır."""
     if not text:
         return ""
-    text = text.lower().strip()
-    return re.sub(r'[\s\-_:,\.\!\?\'"”“\(\)]', '', text)
+    return "".join(c for c in text.lower() if c.isalnum())
 
 
 def generate_quiz_image(img_bytes: bytes, zoom_factor: float, center_pct: tuple) -> io.BytesIO:
@@ -90,7 +90,6 @@ def generate_quiz_image(img_bytes: bytes, zoom_factor: float, center_pct: tuple)
     bottom = top + crop_h
     
     img = img.crop((left, top, right, bottom))
-    # Rotasyon tamamen kaldırıldı
     img = img.resize((orig_w, orig_h), Image.Resampling.LANCZOS)
     
     out_bytes = io.BytesIO()
@@ -108,7 +107,6 @@ async def fetch_top_vns() -> list:
     }
     
     # 1. ve 2. sayfanın seçilme ihtimalini belirgin şekilde artırıyoruz
-    # Liste içinde 1 ve 2 daha fazla yer kapladığı için seçim ağırlıklı olarak ilk 2 sayfadan olacaktır.
     weighted_pages = [1, 1, 1, 1, 2, 2, 2, 2, 3, 4, 5]
     selected_page = random.choice(weighted_pages)
     
@@ -147,7 +145,6 @@ async def start_quiz_question():
     
     if not valid_vns:
         print("[quiz] HATA: Geçerli resme sahip VN listesi alınamadı.")
-        # Veri gelmezse 5 saniye sonra tekrar dener
         asyncio.create_task(next_quiz_question_delay(5.0))
         return
 
@@ -371,13 +368,24 @@ async def on_member_remove(member: discord.Member):
 async def on_message(message: discord.Message):
     global bump_task, quiz_state
 
-    # Quiz Doğru Yanıt Kontrolü
+    # Quiz Doğru Yanıt Kontrolü (Esnek ve Kısmi Eşleşme)
     if quiz_state["active"] and message.channel.id == QUIZ_CHANNEL_ID and not message.author.bot:
         guess_normalized = normalize_title(message.content)
         title_normalized = normalize_title(quiz_state["vn_title"])
         alttitle_normalized = normalize_title(quiz_state["vn_alttitle"])
 
-        if (guess_normalized == title_normalized) or (alttitle_normalized and guess_normalized == alttitle_normalized):
+        is_correct = False
+
+        if len(guess_normalized) >= 4:
+            # En az 4 harf girilmişse ismin içinde herhangi bir yerde geçmesi yeterlidir
+            if (guess_normalized in title_normalized) or (alttitle_normalized and guess_normalized in alttitle_normalized):
+                is_correct = True
+        elif len(guess_normalized) > 0:
+            # 4 harften kısa isimler (Örn: "Air") için birebir eşleşme istenir
+            if (guess_normalized == title_normalized) or (alttitle_normalized and guess_normalized == alttitle_normalized):
+                is_correct = True
+
+        if is_correct:
             quiz_state["active"] = False
             quiz_state["current_msg_id"] = None
             
