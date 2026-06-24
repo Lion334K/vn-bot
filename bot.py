@@ -133,6 +133,33 @@ async def fetch_top_vns() -> list:
         return []
 
 
+async def fetch_random_top_anime():
+    """MyAnimeList ilk 100 animesi arasından rastgele birini seçer."""
+    # Jikan API her sayfada 25 anime verir. İlk 100 anime için 1 ile 4 arasında bir sayfa seçiyoruz.
+    page = random.randint(1, 4)
+    url = f"https://api.jikan.moe/v4/top/anime?page={page}"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    anime_list = data.get("data", [])
+                    if anime_list:
+                        chosen = random.choice(anime_list)
+                        title = chosen.get("title", "")
+                        alttitle = chosen.get("title_english") or ""
+                        
+                        # Mümkünse büyük kaliteli resmi, yoksa normalini al
+                        images = chosen.get("images", {}).get("jpg", {})
+                        img_url = images.get("large_image_url") or images.get("image_url")
+                        
+                        return {"title": title, "alttitle": alttitle, "image_url": img_url}
+    except Exception as e:
+        print(f"[quiz] Jikan API Error: {e}")
+    return None
+
+
 async def start_quiz_question():
     global quiz_state
     quiz_channel = bot.get_channel(QUIZ_CHANNEL_ID)
@@ -140,23 +167,34 @@ async def start_quiz_question():
         print("[quiz] HATA: Quiz kanalı bulunamadı.")
         return
 
-    vns = await fetch_top_vns()
-    valid_vns = [v for v in vns if v.get("image") and v.get("image").get("url")]
-    
-    if not valid_vns:
-        print("[quiz] HATA: Geçerli resme sahip VN listesi alınamadı.")
+    # %70 ihtimalle VN, %30 ihtimalle Anime seçecek
+    source_type = random.choices(["vn", "anime"], weights=[70, 30])[0]
+    title, alttitle, img_url = "", "", None
+
+    if source_type == "vn":
+        vns = await fetch_top_vns()
+        valid_vns = [v for v in vns if v.get("image") and v.get("image").get("url")]
+        if valid_vns:
+            chosen_vn = random.choice(valid_vns)
+            title = chosen_vn.get("title")
+            alttitle = chosen_vn.get("alttitle", "")
+            img_url = chosen_vn.get("image").get("url")
+    else:
+        anime = await fetch_random_top_anime()
+        if anime:
+            title = anime["title"]
+            alttitle = anime["alttitle"]
+            img_url = anime["image_url"]
+
+    if not img_url:
+        print(f"[quiz] HATA: Resim bulunamadı. Kaynak: {source_type}. Tekrar deneniyor...")
         asyncio.create_task(next_quiz_question_delay(5.0))
         return
-
-    chosen_vn = random.choice(valid_vns)
-    title = chosen_vn.get("title")
-    alttitle = chosen_vn.get("alttitle", "")
-    img_url = chosen_vn.get("image").get("url")
 
     async with aiohttp.ClientSession() as session:
         async with session.get(img_url) as resp:
             if resp.status != 200:
-                print("[quiz] HATA: Kapak resmi indirilemedi.")
+                print(f"[quiz] HATA: Kapak resmi indirilemedi ({source_type}).")
                 asyncio.create_task(next_quiz_question_delay(5.0))
                 return
             img_bytes = await resp.read()
@@ -183,7 +221,7 @@ async def start_quiz_question():
     quiz_state["current_msg_id"] = msg.id
     await msg.add_reaction("🔍")
     await msg.add_reaction("⏭️")
-    print(f"[quiz] Soru hazırlandı: {title}")
+    print(f"[quiz] Soru hazırlandı: {title} ({source_type})")
 
 
 async def next_quiz_question_delay(delay: float = 5.0):
@@ -381,7 +419,7 @@ async def on_message(message: discord.Message):
             if (guess_normalized in title_normalized) or (alttitle_normalized and guess_normalized in alttitle_normalized):
                 is_correct = True
         elif len(guess_normalized) > 0:
-            # 4 harften kısa isimler (Örn: "Air") için birebir eşleşme istenir
+            # 4 harften kısa isimler için birebir eşleşme istenir
             if (guess_normalized == title_normalized) or (alttitle_normalized and guess_normalized == alttitle_normalized):
                 is_correct = True
 
@@ -468,12 +506,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     
                     if quiz_state["zoom_factor"] >= 1.0:
                         await clue_msg.add_reaction("⏭️")
-                        await channel.send("📢 **Resim tamamen açıldı!** Soruyu atlamak için ⏭️ emojisine tıklayabilirsiniz (3 kişi gerekli).")
+                        await channel.send("📢 **Resim tamamen açıldı!** Soruyu atlamak için ⏭️ emojisine tıklayabilirsiniz (2 kişi gerekli).")
                     else:
                         await clue_msg.add_reaction("🔍")
                         await clue_msg.add_reaction("⏭️")
 
-        # ⏭️ Atlama Kontrolü (3 Kullanıcı = Toplam 4 oy bot dahil)
+        # ⏭️ Atlama Kontrolü (2 Kullanıcı = Toplam 3 oy bot dahil)
         elif str(payload.emoji) == "⏭️":
             reaction = discord.utils.get(message.reactions, emoji="⏭️")
             if reaction and reaction.count >= 3:
