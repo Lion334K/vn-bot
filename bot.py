@@ -7,6 +7,7 @@ import re
 import os
 import io
 import aiohttp
+from collections import deque
 from datetime import datetime, timezone, timedelta
 from PIL import Image
 
@@ -49,15 +50,17 @@ media_loop_task    = None
 media_queue        = []
 welcome_message_log: dict = {}
 
-# Quiz State
+# Quiz State ve Hafıza (Son 50 seriyi tutar)
+asked_series_history = deque(maxlen=50)
+
 quiz_state = {
     "active": False,
     "vn_title": "",
     "vn_alttitle": "",
     "image_bytes": None,
     "crop_center": (0.5, 0.5),
-    "zoom_factor": 0.2,       # Başlangıç yakınlık oranı
-    "current_msg_id": None    # Üzerinde etkileşim beklenen son ipucu mesajı
+    "zoom_factor": 0.2,       
+    "current_msg_id": None    
 }
 
 # ───────────────────────────────────────────────
@@ -106,7 +109,6 @@ async def fetch_top_vns() -> list:
         "User-Agent": "DiscordVNQuizBot/1.0"
     }
     
-    # 1. ve 2. sayfanın seçilme ihtimalini belirgin şekilde artırıyoruz
     weighted_pages = [1, 1, 1, 1, 2, 2, 2, 2, 3, 4, 5]
     selected_page = random.choice(weighted_pages)
     
@@ -120,6 +122,8 @@ async def fetch_top_vns() -> list:
     }
     
     try:
+        # İstek atmadan önce botu çok yormamak için mikro bekleme
+        await asyncio.sleep(1.5)
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload) as resp:
                 if resp.status == 200:
@@ -134,70 +138,90 @@ async def fetch_top_vns() -> list:
 
 
 async def fetch_random_top_anime():
-    """MyAnimeList ilk 100 animesi arasından rastgele birini seçer."""
-    # Jikan API her sayfada 25 anime verir. İlk 100 anime için 1 ile 4 arasında bir sayfa seçiyoruz.
     page = random.randint(1, 4)
     url = f"https://api.jikan.moe/v4/top/anime?page={page}"
     
     try:
+        # İstek atmadan önce botu çok yormamak için mikro bekleme
+        await asyncio.sleep(1.5)
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     anime_list = data.get("data", [])
-                    if anime_list:
-                        chosen = random.choice(anime_list)
-                        title = chosen.get("title", "")
-                        alttitle = chosen.get("title_english") or ""
-                        
-                        # Mümkünse büyük kaliteli resmi, yoksa normalini al
+                    formatted_list = []
+                    
+                    for chosen in anime_list:
+                        t = chosen.get("title", "")
+                        alt = chosen.get("title_english") or ""
                         images = chosen.get("images", {}).get("jpg", {})
                         img_url = images.get("large_image_url") or images.get("image_url")
-                        
-                        return {"title": title, "alttitle": alttitle, "image_url": img_url}
+                        if img_url:
+                            formatted_list.append({"title": t, "alttitle": alt, "image_url": img_url})
+                            
+                    return formatted_list
     except Exception as e:
         print(f"[quiz] Jikan API Error: {e}")
-    return None
+    return []
 
 
 async def start_quiz_question():
-    global quiz_state
+    global quiz_state, asked_series_history
     quiz_channel = bot.get_channel(QUIZ_CHANNEL_ID)
     if not quiz_channel:
         print("[quiz] HATA: Quiz kanalı bulunamadı.")
         return
 
-    # %70 ihtimalle VN, %30 ihtimalle Anime seçecek
     source_type = random.choices(["vn", "anime"], weights=[70, 30])[0]
     title, alttitle, img_url = "", "", None
 
     if source_type == "vn":
         vns = await fetch_top_vns()
-        valid_vns = [v for v in vns if v.get("image") and v.get("image").get("url")]
+        valid_vns = [v for v in vns if v.get("image") and v.get("image").get("url") and v.get("title") not in asked_series_history]
+        
+        if not valid_vns and vns:
+            valid_vns = [v for v in vns if v.get("image") and v.get("image").get("url")]
+
         if valid_vns:
             chosen_vn = random.choice(valid_vns)
             title = chosen_vn.get("title")
             alttitle = chosen_vn.get("alttitle", "")
             img_url = chosen_vn.get("image").get("url")
     else:
-        anime = await fetch_random_top_anime()
-        if anime:
-            title = anime["title"]
-            alttitle = anime["alttitle"]
-            img_url = anime["image_url"]
+        animes = await fetch_random_top_anime()
+        valid_animes = [a for a in animes if a["title"] not in asked_series_history]
+        
+        if not valid_animes and animes:
+            valid_animes = animes
+            
+        if valid_animes:
+            chosen = random.choice(valid_animes)
+            title = chosen["title"]
+            alttitle = chosen["alttitle"]
+            img_url = chosen["image_url"]
 
     if not img_url:
-        print(f"[quiz] HATA: Resim bulunamadı. Kaynak: {source_type}. Tekrar deneniyor...")
-        asyncio.create_task(next_quiz_question_delay(5.0))
+        print(f"[quiz] HATA: Resim bulunamadı. Kaynak: {source_type}. 2 sn sonra tekrar deneniyor...")
+        asyncio.create_task(next_quiz_question_delay(2.0))
         return
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(img_url) as resp:
-            if resp.status != 200:
-                print(f"[quiz] HATA: Kapak resmi indirilemedi ({source_type}).")
-                asyncio.create_task(next_quiz_question_delay(5.0))
-                return
-            img_bytes = await resp.read()
+    try:
+        # Resmi indirmeden önce mikro bekleme (Rate limit kalkanı)
+        await asyncio.sleep(1.0)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(img_url) as resp:
+                if resp.status != 200:
+                    print(f"[quiz] HATA: Kapak resmi indirilemedi ({source_type}).")
+                    asyncio.create_task(next_quiz_question_delay(2.0))
+                    return
+                img_bytes = await resp.read()
+    except Exception as e:
+        print(f"[quiz] İndirme hatası: {e}")
+        asyncio.create_task(next_quiz_question_delay(2.0))
+        return
+
+    # Soruyu hafızaya kaydet
+    asked_series_history.append(title)
 
     quiz_state["active"] = True
     quiz_state["vn_title"] = title
@@ -213,19 +237,22 @@ async def start_quiz_question():
         quiz_state["crop_center"]
     )
 
+    # Discord'a göndermeden önce mikro bekleme (Spam kalkanı)
+    await asyncio.sleep(1.0)
+    
     msg = await quiz_channel.send(
-        "🎮 **Yeni Soru!** Bu hangi seri?\n*(Resmi uzaklaştırmak için 🔍, soruyu atlamak için ⏭️ emojisine tıklayın)*",
+        f"🎮 **Yeni Soru!** Bu hangi seri?\n*(Resmi uzaklaştırmak için 🔍, soruyu atlamak için ⏭️ emojisine tıklayın)*",
         file=discord.File(fp=quiz_img, filename="quiz_question.png")
     )
     
     quiz_state["current_msg_id"] = msg.id
     await msg.add_reaction("🔍")
     await msg.add_reaction("⏭️")
-    print(f"[quiz] Soru hazırlandı: {title} ({source_type})")
+    print(f"[quiz] Soru hazırlandı: {title}")
 
 
-async def next_quiz_question_delay(delay: float = 5.0):
-    """Belirtilen saniye kadar bekleyip yeni soru tetikler."""
+async def next_quiz_question_delay(delay: float = 2.0):
+    """Soru bitiminde aradaki gecikmeyi sağlar (oyun akıcılığı için 2 sn)"""
     await asyncio.sleep(delay)
     await start_quiz_question()
 
@@ -406,7 +433,7 @@ async def on_member_remove(member: discord.Member):
 async def on_message(message: discord.Message):
     global bump_task, quiz_state
 
-    # Quiz Doğru Yanıt Kontrolü (Esnek ve Kısmi Eşleşme)
+    # Quiz Doğru Yanıt Kontrolü
     if quiz_state["active"] and message.channel.id == QUIZ_CHANNEL_ID and not message.author.bot:
         guess_normalized = normalize_title(message.content)
         title_normalized = normalize_title(quiz_state["vn_title"])
@@ -415,11 +442,9 @@ async def on_message(message: discord.Message):
         is_correct = False
 
         if len(guess_normalized) >= 4:
-            # En az 4 harf girilmişse ismin içinde herhangi bir yerde geçmesi yeterlidir
             if (guess_normalized in title_normalized) or (alttitle_normalized and guess_normalized in alttitle_normalized):
                 is_correct = True
         elif len(guess_normalized) > 0:
-            # 4 harften kısa isimler için birebir eşleşme istenir
             if (guess_normalized == title_normalized) or (alttitle_normalized and guess_normalized == alttitle_normalized):
                 is_correct = True
 
@@ -433,7 +458,7 @@ async def on_message(message: discord.Message):
             if log_channel:
                 await log_channel.send(f"{message.author.name} +1 puan")
             
-            asyncio.create_task(next_quiz_question_delay(5.0))
+            asyncio.create_task(next_quiz_question_delay(2.0))
         else:
             await message.add_reaction("❌")
 
@@ -472,120 +497,5 @@ async def on_message(message: discord.Message):
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     global quiz_state
     
-    if quiz_state["active"] and quiz_state["current_msg_id"] == payload.message_id:
-        if payload.user_id == bot.user.id:
-            return
-
-        channel = bot.get_channel(payload.channel_id)
-        if not channel:
-            return
-            
-        try:
-            message = await channel.fetch_message(payload.message_id)
-        except Exception:
-            return
-
-        # 🔍 Zoom Out Kontrolü (1 Kullanıcı = Toplam 2 oy bot dahil)
-        if str(payload.emoji) == "🔍":
-            reaction = discord.utils.get(message.reactions, emoji="🔍")
-            if reaction and reaction.count >= 2:
-                if quiz_state["zoom_factor"] < 1.0:
-                    quiz_state["zoom_factor"] = min(1.0, quiz_state["zoom_factor"] + 0.15)
-                    
-                    clue_img = generate_quiz_image(
-                        quiz_state["image_bytes"],
-                        quiz_state["zoom_factor"],
-                        quiz_state["crop_center"]
-                    )
-                    clue_msg = await channel.send(
-                        "🔍 **İpucu!** Biri büyütece tıkladı, resim biraz daha uzaklaştırıldı:",
-                        file=discord.File(fp=clue_img, filename="quiz_clue.png")
-                    )
-                    
-                    quiz_state["current_msg_id"] = clue_msg.id
-                    
-                    if quiz_state["zoom_factor"] >= 1.0:
-                        await clue_msg.add_reaction("⏭️")
-                        await channel.send("📢 **Resim tamamen açıldı!** Soruyu atlamak için ⏭️ emojisine tıklayabilirsiniz (2 kişi gerekli).")
-                    else:
-                        await clue_msg.add_reaction("🔍")
-                        await clue_msg.add_reaction("⏭️")
-
-        # ⏭️ Atlama Kontrolü (2 Kullanıcı = Toplam 3 oy bot dahil)
-        elif str(payload.emoji) == "⏭️":
-            reaction = discord.utils.get(message.reactions, emoji="⏭️")
-            if reaction and reaction.count >= 3:
-                quiz_state["active"] = False
-                quiz_state["current_msg_id"] = None
-                
-                await channel.send(f"⏭️ **Oylama başarılı! Soru atlandı.** Doğru cevap: **{quiz_state['vn_title']}** olacaktı.")
-                asyncio.create_task(next_quiz_question_delay(5.0))
-
-# ───────────────────────────────────────────────
-#  SLASH COMMANDS
-# ───────────────────────────────────────────────
-
-@bot.tree.command(name="startquiz", description="Manuel olarak yeni bir quiz sorusu başlatır.")
-@app_commands.checks.has_permissions(administrator=True)
-async def start_quiz(interaction: discord.Interaction):
-    global quiz_state
-    await interaction.response.defer(ephemeral=True)
-    try:
-        if quiz_state["active"]:
-            quiz_channel = bot.get_channel(QUIZ_CHANNEL_ID)
-            if quiz_channel:
-                await quiz_channel.send(f"⏰ **Yeni soru istendi!** Eski soru kapatıldı. Cevap: **{quiz_state['vn_title']}** olacaktı.")
-        
-        await start_quiz_question()
-        await interaction.followup.send("✅ Yeni quiz sorusu başarıyla başlatıldı!", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Soru başlatılırken bir hata oluştu: {e}", ephemeral=True)
-
-@bot.tree.command(name="setwelcome", description="Hoşgeldin mesajını değiştir. {member} yeni üyeyi etiketler.")
-@app_commands.checks.has_permissions(administrator=True)
-async def set_welcome(interaction: discord.Interaction, message: str):
-    global WELCOME_MESSAGE
-    WELCOME_MESSAGE = message
-    await interaction.response.send_message(f"✅ Güncellendi:\n> {WELCOME_MESSAGE}", ephemeral=True)
-
-@bot.tree.command(name="testwelcome", description="Mevcut hoşgeldin mesajını önizle.")
-@app_commands.checks.has_permissions(administrator=True)
-async def test_welcome(interaction: discord.Interaction):
-    msg = WELCOME_MESSAGE.replace("{member}", interaction.user.mention)
-    await interaction.response.send_message(f"**Önizleme:**\n{msg}", ephemeral=True)
-
-@bot.tree.command(name="setbump", description="Bump hatırlatma mesajını değiştir.")
-@app_commands.checks.has_permissions(administrator=True)
-async def set_bump(interaction: discord.Interaction, message: str):
-    global BUMP_MESSAGE
-    BUMP_MESSAGE = message
-    await interaction.response.send_message(f"✅ Güncellendi:\n> {BUMP_MESSAGE}", ephemeral=True)
-
-@bot.tree.command(name="startmedia", description="Start posting random images/gifs based on chat activity.")
-@app_commands.checks.has_permissions(administrator=True)
-async def start_media(interaction: discord.Interaction):
-    global media_loop_running, media_loop_task
-    if media_loop_running:
-        await interaction.response.send_message("⚠️ Already running!", ephemeral=True)
+    if not quiz_state["active"] or quiz_state["current_msg_id"] != payload.message_id:
         return
-    media_loop_running = True
-    media_loop_task = asyncio.ensure_future(run_media_loop())
-    await interaction.response.send_message("✅ Started.", ephemeral=True)
-
-@bot.tree.command(name="stopmedia", description="Stop posting random images/gifs.")
-@app_commands.checks.has_permissions(administrator=True)
-async def stop_media(interaction: discord.Interaction):
-    global media_loop_running, media_loop_task
-    if not media_loop_running:
-        await interaction.response.send_message("⚠️ Not running.", ephemeral=True)
-        return
-    media_loop_running = False
-    if media_loop_task and not media_loop_task.done():
-        media_loop_task.cancel()
-    await interaction.response.send_message("🛑 Stopped.", ephemeral=True)
-
-if __name__ == "__main__":
-    if TOKEN:
-        bot.run(TOKEN)
-    else:
-        print("HATA: DISCORD_TOKEN bulunamadı!")
