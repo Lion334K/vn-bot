@@ -67,11 +67,40 @@ quiz_state = {
 #  QUIZ HELPERS & IMAGE PROCESSING
 # ───────────────────────────────────────────────
 
-def normalize_title(text: str) -> str:
-    """Tüm boşlukları ve noktalama işaretlerini silip sadece harf ve rakamları bırakır."""
-    if not text:
-        return ""
-    return "".join(c for c in text.lower() if c.isalnum())
+def check_answer(guess: str, title: str) -> bool:
+    """
+    Kullanıcının tahminini başlıkla karşılaştırır. 
+    Kelimelerin yarım yazılmasını engeller (Örn: 'utawarerumono' için 'warerumono' kabul edilmez).
+    Ancak başlığın içindeki tam bir kelimeyi söylerse kabul eder (Örn: 'Steins Gate' için 'Steins' kabul edilir).
+    """
+    if not title or not guess: 
+        return False
+    
+    def clean_text(t):
+        t = t.lower()
+        # Noktalama işaretlerini boşluğa çevir ki kelimeler ayrılsın (Örn: Fate/Stay -> fate stay)
+        t = "".join(c if c.isalnum() else " " for c in t)
+        # Fazla boşlukları temizle
+        return " ".join(t.split())
+        
+    clean_guess = clean_text(guess)
+    clean_title = clean_text(title)
+    
+    if not clean_guess:
+        return False
+        
+    # 1. Birebir aynıysa (Tam eşleşme)
+    if clean_guess == clean_title:
+        return True
+        
+    # 2. Tahmin edilen şey en az 4 harfliyse, başlığın içinde "TAM KELİME" olarak geçiyor mu?
+    # \b word boundary (kelime sınırı) demektir.
+    if len(clean_guess.replace(" ", "")) >= 4:
+        pattern = r'\b' + re.escape(clean_guess) + r'\b'
+        if re.search(pattern, clean_title):
+            return True
+            
+    return False
 
 
 def generate_quiz_image(img_bytes: bytes, zoom_factor: float, center_pct: tuple) -> io.BytesIO:
@@ -122,7 +151,6 @@ async def fetch_top_vns() -> list:
     }
     
     try:
-        # İstek atmadan önce botu çok yormamak için mikro bekleme
         await asyncio.sleep(1.5)
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload) as resp:
@@ -142,7 +170,6 @@ async def fetch_random_top_anime():
     url = f"https://api.jikan.moe/v4/top/anime?page={page}"
     
     try:
-        # İstek atmadan önce botu çok yormamak için mikro bekleme
         await asyncio.sleep(1.5)
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
@@ -206,7 +233,6 @@ async def start_quiz_question():
         return
 
     try:
-        # Resmi indirmeden önce mikro bekleme (Rate limit kalkanı)
         await asyncio.sleep(1.0)
         async with aiohttp.ClientSession() as session:
             async with session.get(img_url) as resp:
@@ -237,7 +263,6 @@ async def start_quiz_question():
         quiz_state["crop_center"]
     )
 
-    # Discord'a göndermeden önce mikro bekleme (Spam kalkanı)
     await asyncio.sleep(1.0)
     
     msg = await quiz_channel.send(
@@ -252,7 +277,6 @@ async def start_quiz_question():
 
 
 async def next_quiz_question_delay(delay: float = 2.0):
-    """Soru bitiminde aradaki gecikmeyi sağlar (oyun akıcılığı için 2 sn)"""
     await asyncio.sleep(delay)
     await start_quiz_question()
 
@@ -435,18 +459,12 @@ async def on_message(message: discord.Message):
 
     # Quiz Doğru Yanıt Kontrolü
     if quiz_state["active"] and message.channel.id == QUIZ_CHANNEL_ID and not message.author.bot:
-        guess_normalized = normalize_title(message.content)
-        title_normalized = normalize_title(quiz_state["vn_title"])
-        alttitle_normalized = normalize_title(quiz_state["vn_alttitle"])
-
-        is_correct = False
-
-        if len(guess_normalized) >= 4:
-            if (guess_normalized in title_normalized) or (alttitle_normalized and guess_normalized in alttitle_normalized):
-                is_correct = True
-        elif len(guess_normalized) > 0:
-            if (guess_normalized == title_normalized) or (alttitle_normalized and guess_normalized == alttitle_normalized):
-                is_correct = True
+        
+        # Kelime bazlı akıllı eşleştirme ile kontrol ediyoruz
+        is_correct = check_answer(message.content, quiz_state["vn_title"])
+        
+        if not is_correct and quiz_state["vn_alttitle"]:
+            is_correct = check_answer(message.content, quiz_state["vn_alttitle"])
 
         if is_correct:
             quiz_state["active"] = False
@@ -520,7 +538,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             if quiz_state["zoom_factor"] < 1.0:
                 quiz_state["zoom_factor"] = min(1.0, quiz_state["zoom_factor"] + 0.15)
                 
-                # Resim işlemeden önce de çok ufak bir bekleme (sunucuyu kitlememek için)
                 await asyncio.sleep(0.5)
                 clue_img = generate_quiz_image(
                     quiz_state["image_bytes"],
