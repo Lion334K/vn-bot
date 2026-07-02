@@ -731,11 +731,17 @@ async def eslestir(interaction: discord.Interaction, member: discord.Member, cha
     # Hafızayı güncelle
     posting_registry[str(member.id)] = channel.id
     
+    # Yan hesaba/kişiye kanalı yönetebilmesi/yazabilmesi için yetki ver
+    try:
+        await channel.set_permissions(member, read_messages=True, send_messages=True)
+    except Exception as e:
+        print(f"[sistem] İzinler güncellenirken hata: {e}")
+        
     # Değişiklikleri image log kanalına kaydet
     await save_registry_to_log()
     
     await interaction.response.send_message(
-        f"✅ **Eşleştirme Başarılı!** {member.mention} kullanıcısı {channel.mention} kanalıyla eşleştirildi ve hafızaya kaydedildi.", 
+        f"✅ **Eşleştirme Başarılı!** {member.mention} kullanıcısı {channel.mention} kanalıyla eşleştirildi ve gerekli izinleri verildi.", 
         ephemeral=True
     )
 
