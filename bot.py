@@ -598,9 +598,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     pass
                 return
 
-            # Kanal izin ayarları: Sadece oluşturan kişi ve bot görebilir/yazabilir, @everyone yazamaz/göremez
+            # Kanal izin ayarları: Herkes görebilir (@everyone) fakat sadece oluşturan kişi ve bot yazabilir
             overwrites = {
-                guild.default_role: discord.PermissionOverwrite(read_messages=False, send_messages=False),
+                guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
                 member: discord.PermissionOverwrite(read_messages=True, send_messages=True),
                 guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
             }
@@ -717,9 +717,9 @@ async def izin(interaction: discord.Interaction, islem: Literal["ver", "al"], ku
             await interaction.channel.set_permissions(kullanici, read_messages=True, send_messages=True)
             await interaction.response.send_message(f"✅ {kullanici.mention} kullanıcısına bu kanalda yazma izni verildi.", ephemeral=True)
         elif islem == "al":
-            # Kişinin kanal üzerindeki özel iznini sıfırla (varsayılan duruma döner, yani göremez)
+            # Kişinin kanal üzerindeki özel iznini sıfırla (varsayılan duruma döner, yani görebilir ama yazamaz)
             await interaction.channel.set_permissions(kullanici, overwrite=None)
-            await interaction.response.send_message(f"✅ {kullanici.mention} kullanıcısının bu kanaldaki erişimi kaldırıldı.", ephemeral=True)
+            await interaction.response.send_message(f"✅ {kullanici.mention} kullanıcısının bu kanaldaki yazma erişimi kaldırıldı.", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"❌ İşlem sırasında bir hata oluştu: {e}", ephemeral=True)
 
