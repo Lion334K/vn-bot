@@ -624,3 +624,147 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             return
 
     # ─── 2. QUIZ SİSTEMİ REAKSİYON KONTROLLERİ ───
+    if not quiz_state["active"] or quiz_state["current_msg_id"] != payload.message_id:
+        return
+        
+    if payload.user_id == bot.user.id:
+        return
+
+    channel = bot.get_channel(payload.channel_id)
+    if not channel:
+        return
+        
+    try:
+        message = await channel.fetch_message(payload.message_id)
+    except Exception:
+        return
+
+    if str(payload.emoji) == "🔍":
+        reaction = discord.utils.get(message.reactions, emoji="🔍")
+        if reaction and reaction.count >= 2:
+            quiz_state["current_msg_id"] = None 
+            
+            if quiz_state["zoom_factor"] < 1.0:
+                quiz_state["zoom_factor"] = min(1.0, quiz_state["zoom_factor"] + 0.15)
+                
+                await asyncio.sleep(0.5)
+                clue_img = generate_quiz_image(
+                    quiz_state["image_bytes"],
+                    quiz_state["zoom_factor"],
+                    quiz_state["crop_center"]
+                )
+                clue_msg = await channel.send(
+                    "🔍 **İpucu!** Biri büyütece tıkladı, resim biraz daha uzaklaştırıldı:",
+                    file=discord.File(fp=clue_img, filename="quiz_clue.png")
+                )
+                
+                quiz_state["current_msg_id"] = clue_msg.id
+                
+                if quiz_state["zoom_factor"] >= 1.0:
+                    await clue_msg.add_reaction("⏭️")
+                    await channel.send("📢 **Resim tamamen açıldı!** Soruyu atlamak için ⏭️ emojisine tıklayabilirsiniz (3 kişi gerekli).")
+                else:
+                    await clue_msg.add_reaction("🔍")
+                    await clue_msg.add_reaction("⏭️")
+            else:
+                quiz_state["current_msg_id"] = message.id
+
+    elif str(payload.emoji) == "⏭️":
+        reaction = discord.utils.get(message.reactions, emoji="⏭️")
+        if reaction and reaction.count >= 3:
+            quiz_state["active"] = False
+            quiz_state["current_msg_id"] = None 
+            
+            await channel.send(f"⏭️ **Oylama başarılı! Soru atlandı.** Doğru cevap: **{quiz_state['vn_title']}** olacaktı.")
+            asyncio.create_task(next_quiz_question_delay(2.0))
+
+# ───────────────────────────────────────────────
+#  SLASH COMMANDS
+# ───────────────────────────────────────────────
+
+@bot.tree.command(name="eslestir", description="Mevcut/önceden açılmış bir posting kanalını el ile bir kullanıcıya atar.")
+@app_commands.checks.has_permissions(administrator=True)
+async def eslestir(interaction: discord.Interaction, member: discord.Member, channel: discord.TextChannel):
+    global posting_registry
+    
+    # Hafızayı güncelle
+    posting_registry[str(member.id)] = channel.id
+    
+    try:
+        # Garanti olması için kanal konusunu da üyenin ID'si yap
+        await channel.edit(topic=str(member.id))
+    except Exception:
+        pass
+        
+    # Değişiklikleri image log kanalına kaydet
+    await save_registry_to_log()
+    
+    await interaction.response.send_message(
+        f"✅ **Eşleştirme Başarılı!** {member.mention} kullanıcısı {channel.mention} kanalıyla eşleştirildi ve hafızaya kaydedildi.", 
+        ephemeral=True
+    )
+
+@bot.tree.command(name="startquiz", description="Manuel olarak yeni bir quiz sorusu başlatır.")
+@app_commands.checks.has_permissions(administrator=True)
+async def start_quiz(interaction: discord.Interaction):
+    global quiz_state
+    await interaction.response.defer(ephemeral=True)
+    try:
+        if quiz_state["active"]:
+            quiz_channel = bot.get_channel(QUIZ_CHANNEL_ID)
+            if quiz_channel:
+                await quiz_channel.send(f"⏰ **Yeni soru istendi!** Eski soru kapatıldı. Cevap: **{quiz_state['vn_title']}** olacaktı.")
+        
+        await start_quiz_question()
+        await interaction.followup.send("✅ Yeni quiz sorusu başarıyla başlatıldı!", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Soru başlatılırken bir hata oluştu: {e}", ephemeral=True)
+
+@bot.tree.command(name="setwelcome", description="Hoşgeldin mesajını değiştir. {member} yeni üyeyi etiketler.")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_welcome(interaction: discord.Interaction, message: str):
+    global WELCOME_MESSAGE
+    WELCOME_MESSAGE = message
+    await interaction.response.send_message(f"✅ Güncellendi:\n> {WELCOME_MESSAGE}", ephemeral=True)
+
+@bot.tree.command(name="testwelcome", description="Mevcut hoşgeldin mesajını önizle.")
+@app_commands.checks.has_permissions(administrator=True)
+async def test_welcome(interaction: discord.Interaction):
+    msg = WELCOME_MESSAGE.replace("{member}", interaction.user.mention)
+    await interaction.response.send_message(f"**Önizleme:**\n{msg}", ephemeral=True)
+
+@bot.tree.command(name="setbump", description="Bump hatırlatma mesajını değiştir.")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_bump(interaction: discord.Interaction, message: str):
+    global BUMP_MESSAGE
+    BUMP_MESSAGE = message
+    await interaction.response.send_message(f"✅ Güncellendi:\n> {BUMP_MESSAGE}", ephemeral=True)
+
+@bot.tree.command(name="startmedia", description="Start posting random images/gifs based on chat activity.")
+@app_commands.checks.has_permissions(administrator=True)
+async def start_media(interaction: discord.Interaction):
+    global media_loop_running, media_loop_task
+    if media_loop_running:
+        await interaction.response.send_message("⚠️ Already running!", ephemeral=True)
+        return
+    media_loop_running = True
+    media_loop_task = asyncio.ensure_future(run_media_loop())
+    await interaction.response.send_message("✅ Started.", ephemeral=True)
+
+@bot.tree.command(name="stopmedia", description="Stop posting random images/gifs.")
+@app_commands.checks.has_permissions(administrator=True)
+async def stop_media(interaction: discord.Interaction):
+    global media_loop_running, media_loop_task
+    if not media_loop_running:
+        await interaction.response.send_message("⚠️ Not running.", ephemeral=True)
+        return
+    media_loop_running = False
+    if media_loop_task and not media_loop_task.done():
+        media_loop_task.cancel()
+    await interaction.response.send_message("🛑 Stopped.", ephemeral=True)
+
+if __name__ == "__main__":
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
+        print("HATA: DISCORD_TOKEN bulunamadı!")
