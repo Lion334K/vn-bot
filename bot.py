@@ -455,6 +455,16 @@ async def on_ready():
     except Exception:
         pass
 
+    # Gerekli mesaja otomatik ilk + tepkisini koyma sistemi
+    try:
+        trigger_channel = bot.get_channel(TRIGGER_CHANNEL_ID)
+        if trigger_channel:
+            trigger_msg = await trigger_channel.fetch_message(TRIGGER_MESSAGE_ID)
+            await trigger_msg.add_reaction("➕")
+            print("[sistem] Tetikleyici mesaja + tepkisi otomatik eklendi.")
+    except Exception as e:
+        print(f"[sistem] İlk tepki eklenirken bir hata oluştu: {e}")
+
     log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
     if log_channel:
         await log_channel.send("p")
@@ -599,7 +609,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             category = guild.get_channel(POSTING_CATEGORY_ID)
             
             try:
-                # Kanalı oluştur (Topic kısmı kaldırıldı)
+                # Kanalı oluştur (Topic ve karşılama mesajı tamamen kaldırıldı)
                 new_channel = await guild.create_text_channel(
                     name=channel_name,
                     category=category,
