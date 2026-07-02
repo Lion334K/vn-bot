@@ -33,6 +33,7 @@ QUIZ_LOG_CHANNEL_ID        = 1517151082529296444
 # Posting Kanalı ve Hafıza Ayarları
 TRIGGER_CHANNEL_ID         = 1522166468936990841
 TRIGGER_MESSAGE_ID         = 1522168210718195752
+POSTING_CATEGORY_ID        = 1519120736290340924
 LOG_HEADER                 = "---POSTING_REGISTRY_DATA---"
 
 WELCOME_MESSAGE = "{member} aramıza katıldı fln filan iste 😒"
@@ -595,13 +596,14 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             }
 
             channel_name = f"﹛{member.name}-posting﹜"
+            category = guild.get_channel(POSTING_CATEGORY_ID)
             
             try:
-                # Kanalı oluştur ve konusuna (topic) kullanıcının ID'sini güvenlik amacıyla ata
+                # Kanalı oluştur (Topic kısmı kaldırıldı)
                 new_channel = await guild.create_text_channel(
                     name=channel_name,
+                    category=category,
                     overwrites=overwrites,
-                    topic=str(member.id),
                     reason="Otomatik posting kanalı talebi."
                 )
                 
@@ -609,7 +611,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 posting_registry[str(member.id)] = new_channel.id
                 await save_registry_to_log()
                 
-                await new_channel.send(f"Hoş geldin {member.mention}! Burası senin özel posting kanalın. Senden başkası buraya yazamaz.")
             except Exception as e:
                 print(f"[sistem] Kanal oluşturulurken hata meydana geldi: {e}")
 
@@ -690,12 +691,6 @@ async def eslestir(interaction: discord.Interaction, member: discord.Member, cha
     # Hafızayı güncelle
     posting_registry[str(member.id)] = channel.id
     
-    try:
-        # Garanti olması için kanal konusunu da üyenin ID'si yap
-        await channel.edit(topic=str(member.id))
-    except Exception:
-        pass
-        
     # Değişiklikleri image log kanalına kaydet
     await save_registry_to_log()
     
