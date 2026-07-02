@@ -11,6 +11,7 @@ import json
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from PIL import Image
+from typing import Literal
 
 # ───────────────────────────────────────────────
 #  CONFIGURATION
@@ -141,7 +142,6 @@ def check_answer(guess: str, title: str) -> bool:
         return True
         
     # 2. Tahmin edilen şey en az 4 harfliyse, başlığın içinde "TAM KELİME" olarak geçiyor mu?
-    # \b word boundary (kelime sınırı) demektir.
     if len(clean_guess.replace(" ", "")) >= 4:
         pattern = r'\b' + re.escape(clean_guess) + r'\b'
         if re.search(pattern, clean_title):
@@ -609,7 +609,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             category = guild.get_channel(POSTING_CATEGORY_ID)
             
             try:
-                # Kanalı oluştur (Topic ve karşılama mesajı tamamen kaldırıldı)
+                # Kanalı oluştur
                 new_channel = await guild.create_text_channel(
                     name=channel_name,
                     category=category,
@@ -620,6 +620,9 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 # Hafızayı güncelle ve log kanalına kaydet
                 posting_registry[str(member.id)] = new_channel.id
                 await save_registry_to_log()
+                
+                # Başka hiçbir şey yazmadan sadece etiketle
+                await new_channel.send(member.mention)
                 
             except Exception as e:
                 print(f"[sistem] Kanal oluşturulurken hata meydana geldi: {e}")
@@ -692,6 +695,33 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 # ───────────────────────────────────────────────
 #  SLASH COMMANDS
 # ───────────────────────────────────────────────
+
+@bot.tree.command(name="izin", description="Sadece kendi posting kanalınızda birine mesaj yazma izni verebilir/alabilirsiniz.")
+@app_commands.describe(islem="İzin vermek için 'ver', almak için 'al'", kullanici="İşlem yapılacak kişi")
+async def izin(interaction: discord.Interaction, islem: Literal["ver", "al"], kullanici: discord.Member):
+    global posting_registry
+    
+    # 1. Aidiyet Kontrolü: Komutu kullanan kişi bu kanalın sahibi mi?
+    if posting_registry.get(str(interaction.user.id)) != interaction.channel.id:
+        await interaction.response.send_message("❌ **Hata:** Bu komutu yalnızca size ait olan posting kanalında kullanabilirsiniz.", ephemeral=True)
+        return
+        
+    # 2. Kendine veya bota işlem yapmayı engelle
+    if kullanici.id == interaction.user.id or kullanici.bot:
+        await interaction.response.send_message("⚠️ Kendiniz veya botlar üzerinde işlem yapamazsınız.", ephemeral=True)
+        return
+        
+    try:
+        if islem == "ver":
+            # Kişiye kanalı görme ve yazma izni ver
+            await interaction.channel.set_permissions(kullanici, read_messages=True, send_messages=True)
+            await interaction.response.send_message(f"✅ {kullanici.mention} kullanıcısına bu kanalda yazma izni verildi.", ephemeral=True)
+        elif islem == "al":
+            # Kişinin kanal üzerindeki özel iznini sıfırla (varsayılan duruma döner, yani göremez)
+            await interaction.channel.set_permissions(kullanici, overwrite=None)
+            await interaction.response.send_message(f"✅ {kullanici.mention} kullanıcısının bu kanaldaki erişimi kaldırıldı.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ İşlem sırasında bir hata oluştu: {e}", ephemeral=True)
 
 @bot.tree.command(name="eslestir", description="Mevcut/önceden açılmış bir posting kanalını el ile bir kullanıcıya atar.")
 @app_commands.checks.has_permissions(administrator=True)
