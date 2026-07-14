@@ -58,6 +58,9 @@ media_loop_task    = None
 media_queue        = []
 welcome_message_log: dict = {}
 
+# Yeni Medya Takip Sistemi (Bot açıldığında ilk saate denk gelirse atsın diye 50'den başlatıyoruz)
+messages_since_last_media = 50  
+
 # Posting Hafıza Sözlüğü (Kullanıcı ID -> Kanal ID)
 posting_registry   = {}
 
@@ -84,7 +87,6 @@ async def save_registry_to_log():
     if not log_channel:
         return
     try:
-        # Kanal kirliliğini önlemek için botun eski attığı kayıt mesajlarını temizle
         async for msg in log_channel.history(limit=100):
             if msg.author == bot.user and LOG_HEADER in msg.content:
                 await msg.delete()
@@ -116,19 +118,12 @@ async def load_registry():
 # ───────────────────────────────────────────────
 
 def check_answer(guess: str, title: str) -> bool:
-    """
-    Kullanıcının tahminini başlıkla karşılaştırır. 
-    Kelimelerin yarım yazılmasını engeller (Örn: 'utawarerumono' için 'warerumono' kabul edilmez).
-    Ancak başlığın içindeki tam bir kelimeyi söylerse kabul eder (Örn: 'Steins Gate' için 'Steins' kabul edilir).
-    """
     if not title or not guess: 
         return False
     
     def clean_text(t):
         t = t.lower()
-        # Noktalama işaretlerini boşluğa çevir ki kelimeler ayrılsın (Örn: Fate/Stay -> fate stay)
         t = "".join(c if c.isalnum() else " " for c in t)
-        # Fazla boşlukları temizle
         return " ".join(t.split())
         
     clean_guess = clean_text(guess)
@@ -137,18 +132,15 @@ def check_answer(guess: str, title: str) -> bool:
     if not clean_guess:
         return False
         
-    # 1. Birebir aynıysa (Tam eşleşme)
     if clean_guess == clean_title:
         return True
         
-    # 2. Tahmin edilen şey en az 4 harfliyse, başlığın içinde "TAM KELİME" olarak geçiyor mu?
     if len(clean_guess.replace(" ", "")) >= 4:
         pattern = r'\b' + re.escape(clean_guess) + r'\b'
         if re.search(pattern, clean_title):
             return True
             
     return False
-
 
 def generate_quiz_image(img_bytes: bytes, zoom_factor: float, center_pct: tuple) -> io.BytesIO:
     img = Image.open(io.BytesIO(img_bytes))
@@ -175,7 +167,6 @@ def generate_quiz_image(img_bytes: bytes, zoom_factor: float, center_pct: tuple)
     img.save(out_bytes, format="PNG")
     out_bytes.seek(0)
     return out_bytes
-
 
 async def fetch_top_vns() -> list:
     url = "https://api.vndb.org/kana/vn"
@@ -211,7 +202,6 @@ async def fetch_top_vns() -> list:
         print(f"[quiz] Connection Error: {e}")
         return []
 
-
 async def fetch_random_top_anime():
     page = random.randint(1, 4)
     url = f"https://api.jikan.moe/v4/top/anime?page={page}"
@@ -237,7 +227,6 @@ async def fetch_random_top_anime():
     except Exception as e:
         print(f"[quiz] Jikan API Error: {e}")
     return []
-
 
 async def start_quiz_question():
     global quiz_state, asked_series_history
@@ -293,7 +282,6 @@ async def start_quiz_question():
         asyncio.create_task(next_quiz_question_delay(2.0))
         return
 
-    # Soruyu hafızaya kaydet
     asked_series_history.append(title)
 
     quiz_state["active"] = True
@@ -322,13 +310,12 @@ async def start_quiz_question():
     await msg.add_reaction("⏭️")
     print(f"[quiz] Soru hazırlandı: {title}")
 
-
 async def next_quiz_question_delay(delay: float = 2.0):
     await asyncio.sleep(delay)
     await start_quiz_question()
 
 # ───────────────────────────────────────────────
-#  BUMP HELPERS
+#  BUMP & YENİ MEDIA HELPERS
 # ───────────────────────────────────────────────
 
 async def schedule_bump():
@@ -349,90 +336,93 @@ async def schedule_bump_in(seconds: float):
     except asyncio.CancelledError:
         pass
 
-# ───────────────────────────────────────────────
-#  RANDOM MEDIA HELPERS
-# ───────────────────────────────────────────────
-
-async def get_media_queue() -> list:
-    try:
-        pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
-        if pool_channel is None:
-            return []
-        image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".webm")
-        valid = []
-        async for msg in pool_channel.history(limit=200):
-            media = [
-                (a.url, a.filename)
-                for a in msg.attachments
-                if a.filename.lower().endswith(image_extensions)
-            ]
-            if media:
-                valid.append((msg.author.name, media))
-        random.shuffle(valid)
-        return valid
-    except Exception:
+async def build_media_queue():
+    """Havuzdaki medyaları tarihleriyle birlikte toplar."""
+    pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
+    if not pool_channel: 
         return []
+        
+    image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".webm")
+    items = []
+    
+    async for msg in pool_channel.history(limit=500):
+        for a in msg.attachments:
+            if a.filename.lower().endswith(image_extensions):
+                items.append({
+                    "author": msg.author.name,
+                    "url": a.url,
+                    "filename": a.filename,
+                    "created_at": msg.created_at
+                })
+    return items
+
+def get_seconds_until_next_hour():
+    """Bulunduğumuz zamandan bir sonraki tam saate kalan saniyeyi hesaplar."""
+    now = datetime.now(timezone.utc)
+    next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    return (next_hour - now).total_seconds() + 1 
 
 async def post_random_media():
+    """Ağırlıklı rastgelelik sistemiyle bir resmi seçip gönderir."""
     global media_queue
     try:
         welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
-        if welcome_channel is None:
+        if not welcome_channel: 
             return
-        if not media_queue:
-            media_queue = await get_media_queue()
-        if not media_queue:
+        
+        if not media_queue: 
+            media_queue = await build_media_queue()
+        if not media_queue: 
             return
-        author_name, media_list = media_queue.pop(0)
-        url, filename = random.choice(media_list)
+        
+        # Son 30 günün eşik tarihi
+        threshold_date = datetime.now(timezone.utc) - timedelta(days=30)
+        
+        # Eğer resim son 30 güne aitse 1.3 ağırlık ver (Yani %30 daha fazla şans), değilse 1.0 (Normal şans)
+        weights = [1.3 if item["created_at"] >= threshold_date else 1.0 for item in media_queue]
+        
+        # Ağırlıklara göre rastgele bir öğe seç
+        chosen_item = random.choices(media_queue, weights=weights, k=1)[0]
+        
+        # Aynı resmin hemen üst üste çıkmaması için sıradan çıkar
+        media_queue.remove(chosen_item)
+        
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
+            async with session.get(chosen_item["url"]) as resp:
+                if resp.status != 200: 
                     return
                 data = await resp.read()
+                
         await welcome_channel.send(
-            f"**{author_name}**",
-            file=discord.File(fp=io.BytesIO(data), filename=filename)
+            f"**{chosen_item['author']}**", 
+            file=discord.File(fp=io.BytesIO(data), filename=chosen_item["filename"])
         )
-    except Exception:
-        pass
+    except Exception as e: 
+        print(f"[media] Medya gönderilemedi: {e}")
 
-async def get_active_user_count() -> int:
-    try:
-        welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
-        if welcome_channel is None:
-            return 0
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
-        users = set()
-        async for msg in welcome_channel.history(limit=100, after=cutoff):
-            if not msg.author.bot:
-                users.add(msg.author.id)
-        return len(users)
-    except Exception:
-        return 0
-
-async def run_media_loop(initial_delay: float = 0):
-    global media_loop_running
-    try:
-        if initial_delay > 0:
-            await asyncio.sleep(initial_delay)
-    except asyncio.CancelledError:
-        return
-
+async def run_media_loop():
+    """Her tam saatte uyanıp mesaj kotalarını kontrol eden döngü."""
+    global media_loop_running, messages_since_last_media
+    
     while media_loop_running:
         try:
-            active_users = await get_active_user_count()
-            if active_users >= 5:
-                interval = 30 * 60
-            elif active_users >= 3:
-                interval = 60 * 60
-            else:
-                interval = 3 * 60 * 60
-            await post_random_media()
-            await asyncio.sleep(interval)
-        except asyncio.CancelledError:
+            # Bir sonraki tam saate kadar uyku (Örn: 04:28 ise 05:00'a kadar bekler)
+            sleep_sec = get_seconds_until_next_hour()
+            await asyncio.sleep(sleep_sec)
+            
+            if not media_loop_running: 
+                break
+            
+            # Tam saat geldiğinde 50 mesaj barajı aşılmış mı kontrol et
+            if messages_since_last_media >= 50:
+                await post_random_media()
+                # Gönderdikten sonra sayacı sıfırla
+                messages_since_last_media = 0
+                
+        except asyncio.CancelledError: 
             break
-        except Exception:
+        except Exception as e: 
+            print(f"[media_loop] Hata: {e}")
             await asyncio.sleep(60)
 
 # ───────────────────────────────────────────────
@@ -443,7 +433,6 @@ async def run_media_loop(initial_delay: float = 0):
 async def on_ready():
     global media_loop_running, media_loop_task, bump_task, quiz_state
     
-    # Bot açıldığında kayıtlı posting kanallarını yükle
     await load_registry()
     
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
@@ -455,7 +444,6 @@ async def on_ready():
     except Exception:
         pass
 
-    # Gerekli mesaja otomatik ilk + tepkisini koyma sistemi
     try:
         trigger_channel = bot.get_channel(TRIGGER_CHANNEL_ID)
         if trigger_channel:
@@ -486,7 +474,7 @@ async def on_ready():
 
     if not media_loop_running:
         media_loop_running = True
-        media_loop_task = asyncio.ensure_future(run_media_loop(initial_delay=30 * 60))
+        media_loop_task = asyncio.ensure_future(run_media_loop())
 
     if not quiz_state["active"]:
         asyncio.create_task(start_quiz_question())
@@ -516,14 +504,16 @@ async def on_member_remove(member: discord.Member):
 
 @bot.event
 async def on_message(message: discord.Message):
-    global bump_task, quiz_state
+    global bump_task, quiz_state, messages_since_last_media
+    
+    # Her gelen bot olmayan mesajda sayacı artır (Medya sistemi için)
+    if not message.author.bot:
+        messages_since_last_media += 1
 
     # Quiz Doğru Yanıt Kontrolü
     if quiz_state["active"] and message.channel.id == QUIZ_CHANNEL_ID and not message.author.bot:
         
-        # Kelime bazlı akıllı eşleştirme ile kontrol ediyoruz
         is_correct = check_answer(message.content, quiz_state["vn_title"])
-        
         if not is_correct and quiz_state["vn_alttitle"]:
             is_correct = check_answer(message.content, quiz_state["vn_alttitle"])
 
@@ -586,9 +576,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             if not member or member.bot:
                 return
 
-            # Kullanıcının zaten bir posting kanalı var mı? (Hafızadan kontrol)
             if str(member.id) in posting_registry:
-                # Tepkiyi temizle ve işlemi bitir
                 try:
                     ch = bot.get_channel(payload.channel_id)
                     if ch:
@@ -609,7 +597,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             category = guild.get_channel(POSTING_CATEGORY_ID)
             
             try:
-                # Kanalı oluştur
                 new_channel = await guild.create_text_channel(
                     name=channel_name,
                     category=category,
@@ -617,17 +604,14 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                     reason="Otomatik posting kanalı talebi."
                 )
                 
-                # Hafızayı güncelle ve log kanalına kaydet
                 posting_registry[str(member.id)] = new_channel.id
                 await save_registry_to_log()
                 
-                # Başka hiçbir şey yazmadan sadece etiketle
                 await new_channel.send(member.mention)
                 
             except Exception as e:
                 print(f"[sistem] Kanal oluşturulurken hata meydana geldi: {e}")
 
-            # Kullanıcının bastığı + tepkisini temizle (tekrar basabilmesi veya temiz kalması için)
             try:
                 ch = bot.get_channel(payload.channel_id)
                 if ch:
@@ -701,23 +685,19 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 async def izin(interaction: discord.Interaction, islem: Literal["ver", "al"], kullanici: discord.Member):
     global posting_registry
     
-    # 1. Aidiyet Kontrolü: Komutu kullanan kişi bu kanalın sahibi mi?
     if posting_registry.get(str(interaction.user.id)) != interaction.channel.id:
         await interaction.response.send_message("❌ **Hata:** Bu komutu yalnızca size ait olan posting kanalında kullanabilirsiniz.", ephemeral=True)
         return
         
-    # 2. Kendine veya bota işlem yapmayı engelle
     if kullanici.id == interaction.user.id or kullanici.bot:
         await interaction.response.send_message("⚠️ Kendiniz veya botlar üzerinde işlem yapamazsınız.", ephemeral=True)
         return
         
     try:
         if islem == "ver":
-            # Kişiye kanalı görme ve yazma izni ver
             await interaction.channel.set_permissions(kullanici, read_messages=True, send_messages=True)
             await interaction.response.send_message(f"✅ {kullanici.mention} kullanıcısına bu kanalda yazma izni verildi.", ephemeral=True)
         elif islem == "al":
-            # Kişinin kanal üzerindeki özel iznini sıfırla (varsayılan duruma döner, yani görebilir ama yazamaz)
             await interaction.channel.set_permissions(kullanici, overwrite=None)
             await interaction.response.send_message(f"✅ {kullanici.mention} kullanıcısının bu kanaldaki yazma erişimi kaldırıldı.", ephemeral=True)
     except Exception as e:
@@ -728,16 +708,13 @@ async def izin(interaction: discord.Interaction, islem: Literal["ver", "al"], ku
 async def eslestir(interaction: discord.Interaction, member: discord.Member, channel: discord.TextChannel):
     global posting_registry
     
-    # Hafızayı güncelle
     posting_registry[str(member.id)] = channel.id
     
-    # Yan hesaba/kişiye kanalı yönetebilmesi/yazabilmesi için yetki ver
     try:
         await channel.set_permissions(member, read_messages=True, send_messages=True)
     except Exception as e:
         print(f"[sistem] İzinler güncellenirken hata: {e}")
         
-    # Değişiklikleri image log kanalına kaydet
     await save_registry_to_log()
     
     await interaction.response.send_message(
