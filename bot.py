@@ -669,7 +669,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     elif str(payload.emoji) == "⏭️":
         reaction = discord.utils.get(message.reactions, emoji="⏭️")
-        if reaction and reaction.count >= 3:
+        if reaction and reaction.count >= 2:
             quiz_state["active"] = False
             quiz_state["current_msg_id"] = None 
             
