@@ -639,6 +639,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     if str(payload.emoji) == "🔍":
         reaction = discord.utils.get(message.reactions, emoji="🔍")
+        # 2 olması 1 bot + 1 kullanıcı demektir (1 kişi tıkladığında çalışır)
         if reaction and reaction.count >= 2:
             quiz_state["current_msg_id"] = None 
             
@@ -660,7 +661,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
                 
                 if quiz_state["zoom_factor"] >= 1.0:
                     await clue_msg.add_reaction("⏭️")
-                    await channel.send("📢 **Resim tamamen açıldı!** Soruyu atlamak için ⏭️ emojisine tıklayabilirsiniz (3 kişi gerekli).")
+                    await channel.send("📢 **Resim tamamen açıldı!** Soruyu atlamak için ⏭️ emojisine tıklayabilirsiniz.")
                 else:
                     await clue_msg.add_reaction("🔍")
                     await clue_msg.add_reaction("⏭️")
@@ -669,6 +670,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     elif str(payload.emoji) == "⏭️":
         reaction = discord.utils.get(message.reactions, emoji="⏭️")
+        # 2 olması 1 bot + 1 kullanıcı demektir (1 kişi tıkladığında atlar)
         if reaction and reaction.count >= 2:
             quiz_state["active"] = False
             quiz_state["current_msg_id"] = None 
@@ -700,6 +702,27 @@ async def izin(interaction: discord.Interaction, islem: Literal["ver", "al"], ku
         elif islem == "al":
             await interaction.channel.set_permissions(kullanici, overwrite=None)
             await interaction.response.send_message(f"✅ {kullanici.mention} kullanıcısının bu kanaldaki yazma erişimi kaldırıldı.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ İşlem sırasında bir hata oluştu: {e}", ephemeral=True)
+
+@bot.tree.command(name="nsfw", description="Kendi posting kanalınızı yaş sınırlı (NSFW) yapın veya kaldırın.")
+@app_commands.describe(durum="'evet' yaş sınırı ekler, 'hayır' kaldırır")
+async def nsfw(interaction: discord.Interaction, durum: Literal["evet", "hayır"]):
+    global posting_registry
+    
+    if posting_registry.get(str(interaction.user.id)) != interaction.channel.id:
+        await interaction.response.send_message("❌ **Hata:** Bu komutu yalnızca size ait olan posting kanalında kullanabilirsiniz.", ephemeral=True)
+        return
+        
+    try:
+        is_nsfw = (durum == "evet")
+        await interaction.channel.edit(nsfw=is_nsfw)
+        
+        if is_nsfw:
+            await interaction.response.send_message("🔞 **Kanalınız yaş sınırlı (NSFW) olarak ayarlandı.**", ephemeral=True)
+        else:
+            await interaction.response.send_message("✅ **Kanalınızın yaş sınırı (NSFW) kaldırıldı.**", ephemeral=True)
+            
     except Exception as e:
         await interaction.response.send_message(f"❌ İşlem sırasında bir hata oluştu: {e}", ephemeral=True)
 
