@@ -37,6 +37,12 @@ TRIGGER_MESSAGE_ID         = 1522168210718195752
 POSTING_CATEGORY_ID        = 1519120736290340924
 LOG_HEADER                 = "---POSTING_REGISTRY_DATA---"
 
+# Emoji & Webhook Tetikleyici Ayarları
+EMOJI_TRIGGER_USER_ID      = 689780831488573450
+EMOJI_TRIGGER_ID           = 1507819144735756298
+EMOJI_RESPONSE_ID          = 1529887965265002618
+WEBHOOK_URL                = "https://discord.com/api/webhooks/1529887030144929923/iyBvXY9kALb9j62G7s9xjHTPdjFzg-Fnm3B0hY_pxlAGf8KtHMaHtdRovkpwi-XAcDuy"
+
 WELCOME_MESSAGE = "{member} aramıza katıldı fln filan iste 😒"
 BUMP_MESSAGE    = "buuuuuump"
 
@@ -60,8 +66,7 @@ welcome_message_log: dict = {}
 
 messages_since_last_media = 50  
 
-# ARTIK SADECE MİSAFİRLERİ (Komutla Eklenenleri) TUTAR
-# Format: {"Kanal_ID": [misafir_id1, misafir_id2, ...]}
+# Komutla izin verilen misafirlerin kaydı
 posting_registry   = {}
 
 asked_series_history = deque(maxlen=50)
@@ -76,6 +81,20 @@ quiz_state = {
 }
 
 # ───────────────────────────────────────────────
+#  WEBHOOK HELPER
+# ───────────────────────────────────────────────
+
+async def send_webhook_message(webhook_url: str, content: str):
+    """Webhook üzerinden mesaj gönderir."""
+    async with aiohttp.ClientSession() as session:
+        payload = {"content": content}
+        try:
+            async with session.post(webhook_url, json=payload) as resp:
+                pass
+        except Exception as e:
+            print(f"[webhook] Mesaj gönderilirken hata oluştu: {e}")
+
+# ───────────────────────────────────────────────
 #  POSTING SİSTEMİ YARDIMCI FONKSİYONLARI
 # ───────────────────────────────────────────────
 
@@ -86,14 +105,10 @@ def check_is_owner(channel: discord.TextChannel, user_id: int) -> bool:
         
     for target, overwrite in channel.overwrites.items():
         if isinstance(target, discord.Member) and target.id == user_id:
-            # Kullanıcının bu kanalda mesaj atma izni var mı?
             if overwrite.send_messages:
-                # Log kayıtlarında bu kanalın "misafiri" (komutla ekleneni) olarak mı listelenmiş kontrol et
                 guests = posting_registry.get(str(channel.id), [])
                 if not isinstance(guests, list):
                     guests = []
-                
-                # Eğer misafir listesinde yoksa ve mesaj atma izni varsa, bu kişi KANAL SAHİBİDİR.
                 if user_id not in guests:
                     return True
     return False
@@ -125,13 +140,10 @@ async def load_registry():
                 lines = msg.content.split("\n")
                 if len(lines) > 1:
                     raw_data = json.loads(lines[1])
-                    
-                    # Eski (sahip tabanlı) verileri temizlemek için yapısal bir kontrol yapıyoruz
                     posting_registry = {}
                     for k, v in raw_data.items():
                         if isinstance(v, list):
                             posting_registry[k] = v
-                    
                     print(f"[sistem] Kanalların misafir verileri başarıyla hafızaya yüklendi.")
                     return
     except Exception as e:
@@ -422,7 +434,14 @@ async def on_member_remove(member: discord.Member):
 async def on_message(message: discord.Message):
     global bump_task, quiz_state, messages_since_last_media
     
-    if not message.author.bot: messages_since_last_media += 1
+    if not message.author.bot: 
+        messages_since_last_media += 1
+
+        # ─── EMOJI TETİKLEYİCİ WEBHOOK KONTROLÜ ───
+        if message.author.id == EMOJI_TRIGGER_USER_ID and str(EMOJI_TRIGGER_ID) in message.content:
+            target_emoji = bot.get_emoji(EMOJI_RESPONSE_ID)
+            emoji_str = str(target_emoji) if target_emoji else f"<:emoji:{EMOJI_RESPONSE_ID}>"
+            asyncio.create_task(send_webhook_message(WEBHOOK_URL, emoji_str))
 
     if quiz_state["active"] and message.channel.id == QUIZ_CHANNEL_ID and not message.author.bot:
         is_correct = check_answer(message.content, quiz_state["vn_title"])
@@ -473,7 +492,6 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             category = guild.get_channel(POSTING_CATEGORY_ID)
             if not category: return
 
-            # Tıklayan kişinin halihazırda sahibi olduğu bir kanal var mı kontrol et
             has_channel = False
             for ch in category.text_channels:
                 if check_is_owner(ch, member.id):
@@ -566,8 +584,6 @@ async def izin(interaction: discord.Interaction, islem: Literal["ver", "al"], ku
         ch_id_str = str(interaction.channel.id)
         if islem == "ver":
             await interaction.channel.set_permissions(kullanici, read_messages=True, send_messages=True)
-            
-            # Kişiyi Misafir Listesine Ekle
             if ch_id_str not in posting_registry or not isinstance(posting_registry[ch_id_str], list):
                 posting_registry[ch_id_str] = []
             if kullanici.id not in posting_registry[ch_id_str]:
@@ -578,8 +594,6 @@ async def izin(interaction: discord.Interaction, islem: Literal["ver", "al"], ku
             
         elif islem == "al":
             await interaction.channel.set_permissions(kullanici, overwrite=None)
-            
-            # Kişiyi Misafir Listesinden Çıkar
             if ch_id_str in posting_registry and isinstance(posting_registry[ch_id_str], list):
                 if kullanici.id in posting_registry[ch_id_str]:
                     posting_registry[ch_id_str].remove(kullanici.id)
@@ -614,10 +628,7 @@ async def nsfw(interaction: discord.Interaction, durum: Literal["evet", "hayır"
 async def eslestir(interaction: discord.Interaction, member: discord.Member, channel: discord.TextChannel):
     global posting_registry
     try:
-        # İzni ver
         await channel.set_permissions(member, read_messages=True, send_messages=True)
-        
-        # Eğer bu kişi önceden misafir listesine eklendiyse, tam yetkili görünmesi için onu listeden çıkar
         ch_id_str = str(channel.id)
         if ch_id_str in posting_registry and isinstance(posting_registry[ch_id_str], list):
             if member.id in posting_registry[ch_id_str]:
