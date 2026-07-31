@@ -14,7 +14,7 @@ from PIL import Image
 from typing import Literal
 
 # ───────────────────────────────────────────────
-#  CONFIGURATION
+#  1. KANAL & ID AYARLARI
 # ───────────────────────────────────────────────
 
 TOKEN = os.environ.get("DISCORD_TOKEN")
@@ -43,8 +43,47 @@ EMOJI_TRIGGER_ID           = 1507819144735756298
 EMOJI_RESPONSE_ID          = 1529887965265002618
 WEBHOOK_URL                = "https://discord.com/api/webhooks/1529887030144929923/iyBvXY9kALb9j62G7s9xjHTPdjFzg-Fnm3B0hY_pxlAGf8KtHMaHtdRovkpwi-XAcDuy"
 
-WELCOME_MESSAGE = "{member} aramıza katıldı fln filan iste 😒"
-BUMP_MESSAGE    = "buuuuuump"
+# ───────────────────────────────────────────────
+#  2. MESAJ VE METİN AYARLARI (İstediğin gibi düzenle)
+# ───────────────────────────────────────────────
+
+# -- Karşılama ve Çıkış --
+MSG_WELCOME           = "{member} aramıza katıldı fln filan iste 😒"
+MSG_LEAVE             = "{member} geri gitti... 🥺"
+MSG_BUMP              = "buuuuuump"
+
+# -- Quiz Sistemi Mesajları --
+MSG_QUIZ_NEW          = "🎮 **yeeni soru** bu medyanin adi ney?\n*(resmi uzaklastirmak icin 🔍, soruyu atlamak icin ⏭️ tepkisine basin)*"
+MSG_QUIZ_CORRECT      = "🎉 {member} bildi! cevap: **{title}** (+1 ise yaramaz puan)"
+MSG_QUIZ_CLUE         = "🔍 **buyutece tiklandi!** resim biraz daha zom outlanmistir:"
+MSG_QUIZ_FULL_OPEN    = "📢 **resim sonuna kadar acildi** bulamadiysanis ⏭️ basip atlayin."
+MSG_QUIZ_SKIP         = "⏭️ **oka tiklandi! soru atlanmistir.** cevap: **{title}** idi."
+MSG_QUIZ_FORCE_NEW    = "⏰ yeni soru! eskisinin cevabi: **{title}**"
+MSG_QUIZ_LOG_POINT    = "{name} +1 puan"
+
+# -- İzin ve Hata Mesajları --
+MSG_ERR_NOT_OWNER     = "❌ **duuut:** sadece kendi postınginde eyleyebilirsin bu komudu."
+MSG_ERR_SELF_BOT      = "⚠️ kimi eklemeye calisiyon?"
+MSG_ERR_GENERIC       = "❌ duuut hata: {error}"
+
+# -- Komut Yanıtları --
+MSG_PERM_GIVEN        = "✅ {member} kullanicisina izin eylendi."
+MSG_PERM_TAKEN        = "✅ {member} kullanicisinin izni geri alindi."
+MSG_NSFW_ON           = "🔞 **kanaliniz ayipli oldu.**"
+MSG_NSFW_OFF          = "✅ **kanaliniz tekrar ayipsiz oldu.**"
+MSG_RECOVER_SUCCESS   = "✅ **hooppa!** {member} kullanicisi {channel} tekrar lider atandi."
+
+# -- Sistem Komut Yanıtları --
+MSG_STARTED           = "✅ hoop basladi!"
+MSG_STOPPED           = "🛑 hoop durdu."
+MSG_UPDATED           = "✅ hoop guncellendi."
+MSG_ALREADY_RUNNING   = "⚠️ zaten calisiyo!"
+MSG_ALREADY_STOPPED   = "⚠️ zaten durmus."
+
+# -- Diğer Formatlar --
+FORMAT_POSTING_NAME   = "﹛{name}-posting﹜" # Yeni açılan kanalların isim şablonu
+FORMAT_LOG_ATTACHMENT = "📎 **{name}** (#{channel})" # Log kanalına giden medya formatı
+
 
 # ───────────────────────────────────────────────
 #  BOT SETUP
@@ -64,7 +103,8 @@ media_loop_task    = None
 media_queue        = []
 welcome_message_log: dict = {}
 
-messages_since_last_media = 50  
+# SOHBET AKTİFLİK KONTROLÜ İÇİN SET (Küme)
+active_users_this_hour = set()
 
 # Komutla izin verilen misafirlerin kaydı
 posting_registry   = {}
@@ -85,7 +125,6 @@ quiz_state = {
 # ───────────────────────────────────────────────
 
 async def send_webhook_message(webhook_url: str, content: str):
-    """Webhook üzerinden mesaj gönderir."""
     async with aiohttp.ClientSession() as session:
         payload = {"content": content}
         try:
@@ -99,7 +138,6 @@ async def send_webhook_message(webhook_url: str, content: str):
 # ───────────────────────────────────────────────
 
 def check_is_owner(channel: discord.TextChannel, user_id: int) -> bool:
-    """Bir kullanıcının, belirtilen kanalın 'sahibi' olup olmadığını Discord izinlerine göre denetler."""
     if channel.category_id != POSTING_CATEGORY_ID:
         return False
         
@@ -114,7 +152,6 @@ def check_is_owner(channel: discord.TextChannel, user_id: int) -> bool:
     return False
 
 async def save_registry_to_log():
-    """Misafir kayıtlarını image log kanalına JSON mesajı olarak yazar."""
     log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
     if not log_channel:
         return
@@ -129,7 +166,6 @@ async def save_registry_to_log():
         print(f"[sistem] Veri kaydedilirken hata oluştu: {e}")
 
 async def load_registry():
-    """Bot açıldığında misafir kayıtlarını yükler."""
     global posting_registry
     log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
     if not log_channel:
@@ -154,45 +190,28 @@ async def load_registry():
 # ───────────────────────────────────────────────
 
 def check_answer(guess: str, title: str) -> bool:
-    if not title or not guess: 
-        return False
-    
+    if not title or not guess: return False
     def clean_text(t):
         t = t.lower()
         t = "".join(c if c.isalnum() else " " for c in t)
         return " ".join(t.split())
-        
     clean_guess = clean_text(guess)
     clean_title = clean_text(title)
-    
-    if not clean_guess:
-        return False
-        
-    if clean_guess == clean_title:
-        return True
-        
+    if not clean_guess: return False
+    if clean_guess == clean_title: return True
     if len(clean_guess.replace(" ", "")) >= 4:
         pattern = r'\b' + re.escape(clean_guess) + r'\b'
-        if re.search(pattern, clean_title):
-            return True
-            
+        if re.search(pattern, clean_title): return True
     return False
 
 def generate_quiz_image(img_bytes: bytes, zoom_factor: float, center_pct: tuple) -> io.BytesIO:
-    img = Image.open(io.BytesIO(img_bytes))
-    img = img.convert("L")
+    img = Image.open(io.BytesIO(img_bytes)).convert("L")
     orig_w, orig_h = img.size
     cx, cy = center_pct
-    crop_w = max(20, int(orig_w * zoom_factor))
-    crop_h = max(20, int(orig_h * zoom_factor))
-    center_x = int(orig_w * cx)
-    center_y = int(orig_h * cy)
-    left = max(0, min(center_x - crop_w // 2, orig_w - crop_w))
-    top = max(0, min(center_y - crop_h // 2, orig_h - crop_h))
-    right = left + crop_w
-    bottom = top + crop_h
-    img = img.crop((left, top, right, bottom))
-    img = img.resize((orig_w, orig_h), Image.Resampling.LANCZOS)
+    crop_w, crop_h = max(20, int(orig_w * zoom_factor)), max(20, int(orig_h * zoom_factor))
+    center_x, center_y = int(orig_w * cx), int(orig_h * cy)
+    left, top = max(0, min(center_x - crop_w // 2, orig_w - crop_w)), max(0, min(center_y - crop_h // 2, orig_h - crop_h))
+    img = img.crop((left, top, left + crop_w, top + crop_h)).resize((orig_w, orig_h), Image.Resampling.LANCZOS)
     out_bytes = io.BytesIO()
     img.save(out_bytes, format="PNG")
     out_bytes.seek(0)
@@ -201,46 +220,24 @@ def generate_quiz_image(img_bytes: bytes, zoom_factor: float, center_pct: tuple)
 async def fetch_top_vns() -> list:
     url = "https://api.vndb.org/kana/vn"
     headers = {"Content-Type": "application/json", "Accept": "application/json", "User-Agent": "DiscordVNQuizBot/1.0"}
-    weighted_pages = [1, 1, 1, 1, 2, 2, 2, 2, 3, 4, 5]
-    selected_page = random.choice(weighted_pages)
-    payload = {
-        "filters": ["and", ["id", ">=", "v1"], ["votecount", ">=", 1000]],
-        "fields": "title, alttitle, image.url",
-        "sort": "votecount",
-        "reverse": True,
-        "results": 100,
-        "page": selected_page
-    }
+    payload = {"filters": ["and", ["id", ">=", "v1"], ["votecount", ">=", 1000]], "fields": "title, alttitle, image.url", "sort": "votecount", "reverse": True, "results": 100, "page": random.choice([1, 1, 1, 1, 2, 2, 2, 2, 3, 4, 5])}
     try:
         await asyncio.sleep(1.5)
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload) as resp:
-                if resp.status == 200:
-                    if "application/json" in resp.headers.get("Content-Type", ""):
-                        data = await resp.json()
-                        return data.get("results", [])
-                return []
-    except Exception: return []
+                if resp.status == 200 and "application/json" in resp.headers.get("Content-Type", ""):
+                    return (await resp.json()).get("results", [])
+    except Exception: pass
+    return []
 
 async def fetch_random_top_anime():
-    page = random.randint(1, 4)
-    url = f"https://api.jikan.moe/v4/top/anime?page={page}"
+    url = f"https://api.jikan.moe/v4/top/anime?page={random.randint(1, 4)}"
     try:
         await asyncio.sleep(1.5)
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
-                    anime_list = data.get("data", [])
-                    formatted_list = []
-                    for chosen in anime_list:
-                        t = chosen.get("title", "")
-                        alt = chosen.get("title_english") or ""
-                        images = chosen.get("images", {}).get("jpg", {})
-                        img_url = images.get("large_image_url") or images.get("image_url")
-                        if img_url:
-                            formatted_list.append({"title": t, "alttitle": alt, "image_url": img_url})
-                    return formatted_list
+                    return [{"title": c.get("title", ""), "alttitle": c.get("title_english") or "", "image_url": c.get("images", {}).get("jpg", {}).get("large_image_url") or c.get("images", {}).get("jpg", {}).get("image_url")} for c in (await resp.json()).get("data", []) if (c.get("images", {}).get("jpg", {}).get("large_image_url") or c.get("images", {}).get("jpg", {}).get("image_url"))]
     except Exception: pass
     return []
 
@@ -248,50 +245,38 @@ async def start_quiz_question():
     global quiz_state, asked_series_history
     quiz_channel = bot.get_channel(QUIZ_CHANNEL_ID)
     if not quiz_channel: return
-
     source_type = random.choices(["vn", "anime"], weights=[70, 30])[0]
     title, alttitle, img_url = "", "", None
 
     if source_type == "vn":
         vns = await fetch_top_vns()
-        valid_vns = [v for v in vns if v.get("image") and v.get("image").get("url") and v.get("title") not in asked_series_history]
-        if not valid_vns and vns: valid_vns = [v for v in vns if v.get("image") and v.get("image").get("url")]
+        valid_vns = [v for v in vns if v.get("image") and v.get("image").get("url") and v.get("title") not in asked_series_history] or [v for v in vns if v.get("image") and v.get("image").get("url")]
         if valid_vns:
-            chosen_vn = random.choice(valid_vns)
-            title = chosen_vn.get("title"); alttitle = chosen_vn.get("alttitle", ""); img_url = chosen_vn.get("image").get("url")
+            chosen = random.choice(valid_vns)
+            title, alttitle, img_url = chosen.get("title"), chosen.get("alttitle", ""), chosen.get("image").get("url")
     else:
         animes = await fetch_random_top_anime()
-        valid_animes = [a for a in animes if a["title"] not in asked_series_history]
-        if not valid_animes and animes: valid_animes = animes
+        valid_animes = [a for a in animes if a["title"] not in asked_series_history] or animes
         if valid_animes:
             chosen = random.choice(valid_animes)
-            title = chosen["title"]; alttitle = chosen["alttitle"]; img_url = chosen["image_url"]
+            title, alttitle, img_url = chosen["title"], chosen["alttitle"], chosen["image_url"]
 
-    if not img_url:
-        asyncio.create_task(next_quiz_question_delay(2.0))
-        return
+    if not img_url: return asyncio.create_task(next_quiz_question_delay(2.0))
 
     try:
         await asyncio.sleep(1.0)
         async with aiohttp.ClientSession() as session:
             async with session.get(img_url) as resp:
-                if resp.status != 200:
-                    asyncio.create_task(next_quiz_question_delay(2.0))
-                    return
+                if resp.status != 200: return asyncio.create_task(next_quiz_question_delay(2.0))
                 img_bytes = await resp.read()
-    except Exception:
-        asyncio.create_task(next_quiz_question_delay(2.0))
-        return
+    except Exception: return asyncio.create_task(next_quiz_question_delay(2.0))
 
     asked_series_history.append(title)
     quiz_state.update({"active": True, "vn_title": title, "vn_alttitle": alttitle, "image_bytes": img_bytes, "crop_center": (random.uniform(0.3, 0.7), random.uniform(0.3, 0.7)), "zoom_factor": 0.20, "current_msg_id": None})
     
-    quiz_img = generate_quiz_image(img_bytes, quiz_state["zoom_factor"], quiz_state["crop_center"])
-    await asyncio.sleep(1.0)
-    msg = await quiz_channel.send(f"🎮 **Yeni Soru!** Bu hangi seri?\n*(Resmi uzaklaştırmak için 🔍, soruyu atlamak için ⏭️ emojisine tıklayın)*", file=discord.File(fp=quiz_img, filename="quiz_question.png"))
+    msg = await quiz_channel.send(MSG_QUIZ_NEW, file=discord.File(fp=generate_quiz_image(img_bytes, quiz_state["zoom_factor"], quiz_state["crop_center"]), filename="quiz_question.png"))
     quiz_state["current_msg_id"] = msg.id
-    await msg.add_reaction("🔍")
-    await msg.add_reaction("⏭️")
+    await msg.add_reaction("🔍"); await msg.add_reaction("⏭️")
 
 async def next_quiz_question_delay(delay: float = 2.0):
     await asyncio.sleep(delay)
@@ -305,24 +290,23 @@ async def schedule_bump():
     try:
         await asyncio.sleep(2 * 60 * 60)
         channel = bot.get_channel(BUMP_CHANNEL_ID)
-        if channel: await channel.send(BUMP_MESSAGE)
+        if channel: await channel.send(MSG_BUMP)
     except asyncio.CancelledError: pass
 
 async def schedule_bump_in(seconds: float):
     try:
         await asyncio.sleep(max(0, seconds))
         channel = bot.get_channel(BUMP_CHANNEL_ID)
-        if channel: await channel.send(BUMP_MESSAGE)
+        if channel: await channel.send(MSG_BUMP)
     except asyncio.CancelledError: pass
 
 async def build_media_queue():
     pool_channel = bot.get_channel(EMBED_POOL_CHANNEL_ID)
     if not pool_channel: return []
-    image_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".webm")
     items = []
     async for msg in pool_channel.history(limit=500):
         for a in msg.attachments:
-            if a.filename.lower().endswith(image_extensions):
+            if a.filename.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov", ".webm")):
                 items.append({"author": msg.author.name, "url": a.url, "filename": a.filename, "created_at": msg.created_at})
     return items
 
@@ -336,13 +320,11 @@ async def post_random_media():
     try:
         welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
         if not welcome_channel: return
-        
         if not media_queue: media_queue = await build_media_queue()
         if not media_queue: return
         
         threshold_date = datetime.now(timezone.utc) - timedelta(days=30)
-        weights = [1.3 if item["created_at"] >= threshold_date else 1.0 for item in media_queue]
-        chosen_item = random.choices(media_queue, weights=weights, k=1)[0]
+        chosen_item = random.choices(media_queue, weights=[1.3 if item["created_at"] >= threshold_date else 1.0 for item in media_queue], k=1)[0]
         media_queue.remove(chosen_item)
         
         async with aiohttp.ClientSession() as session:
@@ -354,18 +336,23 @@ async def post_random_media():
     except Exception as e: print(f"[media] Hata: {e}")
 
 async def run_media_loop():
-    global media_loop_running, messages_since_last_media
+    global media_loop_running, active_users_this_hour
     while media_loop_running:
         try:
             sleep_sec = get_seconds_until_next_hour()
             await asyncio.sleep(sleep_sec)
+            
             if not media_loop_running: break
             
-            if messages_since_last_media >= 50:
+            if len(active_users_this_hour) >= 6:
                 await post_random_media()
-                messages_since_last_media = 0
+                
+            active_users_this_hour.clear()
+            
         except asyncio.CancelledError: break
-        except Exception: await asyncio.sleep(60)
+        except Exception as e:
+            print(f"[media loop] Hata: {e}")
+            await asyncio.sleep(60)
 
 # ───────────────────────────────────────────────
 #  EVENTS
@@ -402,8 +389,7 @@ async def on_ready():
             last_bump = next((m for m in messages if m.author.id == BUMP_BOT_ID), None)
             if last_bump:
                 elapsed = (datetime.now(timezone.utc) - last_bump.created_at).total_seconds()
-                remaining = (2 * 60 * 60) - elapsed
-                bump_task = asyncio.ensure_future(schedule_bump_in(max(0, remaining)))
+                bump_task = asyncio.ensure_future(schedule_bump_in(max(0, (2 * 60 * 60) - elapsed)))
     except Exception: pass
 
     if not media_loop_running:
@@ -416,7 +402,7 @@ async def on_ready():
 async def on_member_join(member: discord.Member):
     channel = bot.get_channel(WELCOME_CHANNEL_ID)
     if channel:
-        sent = await channel.send(WELCOME_MESSAGE.replace("{member}", member.mention))
+        sent = await channel.send(MSG_WELCOME.replace("{member}", member.mention))
         welcome_message_log[member.id] = sent.id
 
 @bot.event
@@ -426,40 +412,37 @@ async def on_member_remove(member: discord.Member):
     if channel:
         try:
             msg = await channel.fetch_message(welcome_message_log[member.id])
-            await msg.edit(content=f"{member.mention} geri gitti... 🥺")
+            await msg.edit(content=MSG_LEAVE.replace("{member}", member.mention))
         except Exception: pass
         finally: del welcome_message_log[member.id]
 
 @bot.event
 async def on_message(message: discord.Message):
-    global bump_task, quiz_state, messages_since_last_media
+    global bump_task, quiz_state, active_users_this_hour
     
     if not message.author.bot: 
-        messages_since_last_media += 1
+        active_users_this_hour.add(message.author.id)
 
-        # ─── EMOJI TETİKLEYİCİ WEBHOOK KONTROLÜ ───
         if message.author.id == EMOJI_TRIGGER_USER_ID and str(EMOJI_TRIGGER_ID) in message.content:
             target_emoji = bot.get_emoji(EMOJI_RESPONSE_ID)
             emoji_str = str(target_emoji) if target_emoji else f"<:emoji:{EMOJI_RESPONSE_ID}>"
             asyncio.create_task(send_webhook_message(WEBHOOK_URL, emoji_str))
 
     if quiz_state["active"] and message.channel.id == QUIZ_CHANNEL_ID and not message.author.bot:
-        is_correct = check_answer(message.content, quiz_state["vn_title"])
-        if not is_correct and quiz_state["vn_alttitle"]: is_correct = check_answer(message.content, quiz_state["vn_alttitle"])
-
+        is_correct = check_answer(message.content, quiz_state["vn_title"]) or (quiz_state["vn_alttitle"] and check_answer(message.content, quiz_state["vn_alttitle"]))
         if is_correct:
             quiz_state.update({"active": False, "current_msg_id": None})
-            await message.channel.send(f"🎉 {message.author.mention} doğru bildi! Doğru Cevap: **{quiz_state['vn_title']}** (+1 puan)")
-            
+            await message.channel.send(MSG_QUIZ_CORRECT.replace("{member}", message.author.mention).replace("{title}", quiz_state['vn_title']))
             log_channel = bot.get_channel(QUIZ_LOG_CHANNEL_ID)
-            if log_channel: await log_channel.send(f"{message.author.name} +1 puan")
+            if log_channel: await log_channel.send(MSG_QUIZ_LOG_POINT.replace("{name}", message.author.name))
             asyncio.create_task(next_quiz_question_delay(2.0))
         else: await message.add_reaction("❌")
 
     if not message.author.bot:
         log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
         if log_channel and message.channel.id != IMAGE_LOG_CHANNEL_ID and message.attachments:
-            for a in message.attachments: await log_channel.send(f"📎 **{message.author.display_name}** (#{message.channel.name})", file=await a.to_file())
+            log_text = FORMAT_LOG_ATTACHMENT.replace("{name}", message.author.display_name).replace("{channel}", message.channel.name)
+            for a in message.attachments: await log_channel.send(log_text, file=await a.to_file())
 
     if message.channel.id == ANNOUNCE_SOURCE_CHANNEL_ID and not message.author.bot:
         welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
@@ -470,7 +453,7 @@ async def on_message(message: discord.Message):
                 if embed.type not in ("image", "gifv", "video"): await welcome_channel.send(embed=embed)
 
     if message.channel.id == BUMP_CHANNEL_ID:
-        if message.author == bot.user and message.content == BUMP_MESSAGE: return
+        if message.author == bot.user and message.content == MSG_BUMP: return
         if message.author.id == BUMP_BOT_ID:
             if bump_task and not bump_task.done(): bump_task.cancel()
             bump_task = asyncio.ensure_future(schedule_bump())
@@ -481,29 +464,20 @@ async def on_message(message: discord.Message):
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     global quiz_state
     
-    # ─── OTOMATİK POSTING KANALI OLUŞTURMA SİSTEMİ ───
     if payload.channel_id == TRIGGER_CHANNEL_ID and payload.message_id == TRIGGER_MESSAGE_ID:
         if str(payload.emoji) == "➕":
             guild = bot.get_guild(payload.guild_id)
             if not guild: return
             member = guild.get_member(payload.user_id)
             if not member or member.bot: return
-
             category = guild.get_channel(POSTING_CATEGORY_ID)
             if not category: return
 
-            has_channel = False
-            for ch in category.text_channels:
-                if check_is_owner(ch, member.id):
-                    has_channel = True
-                    break
-
+            has_channel = any(check_is_owner(ch, member.id) for ch in category.text_channels)
             if has_channel:
                 try:
                     ch = bot.get_channel(payload.channel_id)
-                    if ch:
-                        msg = await ch.fetch_message(payload.message_id)
-                        await msg.remove_reaction(payload.emoji, member)
+                    if ch: await (await ch.fetch_message(payload.message_id)).remove_reaction(payload.emoji, member)
                 except Exception: pass
                 return
 
@@ -514,24 +488,17 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             }
 
             try:
-                new_channel = await guild.create_text_channel(
-                    name=f"﹛{member.name}-posting﹜",
-                    category=category,
-                    overwrites=overwrites,
-                    reason="Otomatik posting kanalı talebi."
-                )
+                ch_name = FORMAT_POSTING_NAME.replace("{name}", member.name)
+                new_channel = await guild.create_text_channel(name=ch_name, category=category, overwrites=overwrites, reason="Otomatik posting kanalı talebi.")
                 await new_channel.send(member.mention)
             except Exception as e: print(f"[sistem] Hata: {e}")
 
             try:
                 ch = bot.get_channel(payload.channel_id)
-                if ch:
-                    msg = await ch.fetch_message(payload.message_id)
-                    await msg.remove_reaction(payload.emoji, member)
+                if ch: await (await ch.fetch_message(payload.message_id)).remove_reaction(payload.emoji, member)
             except Exception: pass
             return
 
-    # ─── QUIZ SİSTEMİ ───
     if not quiz_state["active"] or quiz_state["current_msg_id"] != payload.message_id or payload.user_id == bot.user.id: return
     channel = bot.get_channel(payload.channel_id)
     if not channel: return
@@ -545,87 +512,27 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             if quiz_state["zoom_factor"] < 1.0:
                 quiz_state["zoom_factor"] = min(1.0, quiz_state["zoom_factor"] + 0.15)
                 await asyncio.sleep(0.5)
-                clue_img = generate_quiz_image(quiz_state["image_bytes"], quiz_state["zoom_factor"], quiz_state["crop_center"])
-                clue_msg = await channel.send("🔍 **İpucu!** Biri büyütece tıkladı, resim biraz daha uzaklaştırıldı:", file=discord.File(fp=clue_img, filename="quiz_clue.png"))
+                clue_msg = await channel.send(MSG_QUIZ_CLUE, file=discord.File(fp=generate_quiz_image(quiz_state["image_bytes"], quiz_state["zoom_factor"], quiz_state["crop_center"]), filename="quiz_clue.png"))
                 quiz_state["current_msg_id"] = clue_msg.id
                 if quiz_state["zoom_factor"] >= 1.0:
-                    await clue_msg.add_reaction("⏭️")
-                    await channel.send("📢 **Resim tamamen açıldı!** Soruyu atlamak için ⏭️ emojisine tıklayabilirsiniz.")
-                else:
-                    await clue_msg.add_reaction("🔍"); await clue_msg.add_reaction("⏭️")
+                    await clue_msg.add_reaction("⏭️"); await channel.send(MSG_QUIZ_FULL_OPEN)
+                else: await clue_msg.add_reaction("🔍"); await clue_msg.add_reaction("⏭️")
             else: quiz_state["current_msg_id"] = message.id
     elif str(payload.emoji) == "⏭️":
         reaction = discord.utils.get(message.reactions, emoji="⏭️")
         if reaction and reaction.count >= 2:
             quiz_state["active"] = False
             quiz_state["current_msg_id"] = None 
-            await channel.send(f"⏭️ **Oylama başarılı! Soru atlandı.** Doğru cevap: **{quiz_state['vn_title']}** olacaktı.")
+            await channel.send(MSG_QUIZ_SKIP.replace("{title}", quiz_state['vn_title']))
             asyncio.create_task(next_quiz_question_delay(2.0))
 
 # ───────────────────────────────────────────────
 #  SLASH COMMANDS
 # ───────────────────────────────────────────────
 
-@bot.tree.command(name="izin", description="Sadece kendi posting kanalınızda birine mesaj yazma izni verebilir/alabilirsiniz.")
-@app_commands.describe(islem="'ver' veya 'al'", kullanici="İşlem yapılacak kişi")
-async def izin(interaction: discord.Interaction, islem: Literal["ver", "al"], kullanici: discord.Member):
-    global posting_registry
-    
-    is_owner = check_is_owner(interaction.channel, interaction.user.id)
-    if not is_owner and not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ **Hata:** Bu komutu yalnızca size ait olan posting kanalında kullanabilirsiniz.", ephemeral=True)
-        return
-        
-    if kullanici.id == interaction.user.id or kullanici.bot:
-        await interaction.response.send_message("⚠️ Kendiniz veya botlar üzerinde işlem yapamazsınız.", ephemeral=True)
-        return
-        
-    try:
-        ch_id_str = str(interaction.channel.id)
-        if islem == "ver":
-            await interaction.channel.set_permissions(kullanici, read_messages=True, send_messages=True)
-            if ch_id_str not in posting_registry or not isinstance(posting_registry[ch_id_str], list):
-                posting_registry[ch_id_str] = []
-            if kullanici.id not in posting_registry[ch_id_str]:
-                posting_registry[ch_id_str].append(kullanici.id)
-                
-            await save_registry_to_log()
-            await interaction.response.send_message(f"✅ {kullanici.mention} kullanıcısına bu kanalda yazma izni verildi.", ephemeral=True)
-            
-        elif islem == "al":
-            await interaction.channel.set_permissions(kullanici, overwrite=None)
-            if ch_id_str in posting_registry and isinstance(posting_registry[ch_id_str], list):
-                if kullanici.id in posting_registry[ch_id_str]:
-                    posting_registry[ch_id_str].remove(kullanici.id)
-                    if not posting_registry[ch_id_str]:
-                        del posting_registry[ch_id_str]
-                        
-            await save_registry_to_log()
-            await interaction.response.send_message(f"✅ {kullanici.mention} kullanıcısının bu kanaldaki yazma erişimi kaldırıldı.", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ İşlem sırasında bir hata oluştu: {e}", ephemeral=True)
-
-@bot.tree.command(name="nsfw", description="Kendi posting kanalınızı yaş sınırlı (NSFW) yapın veya kaldırın.")
-@app_commands.describe(durum="'evet' yaş sınırı ekler, 'hayır' kaldırır")
-async def nsfw(interaction: discord.Interaction, durum: Literal["evet", "hayır"]):
-    is_owner = check_is_owner(interaction.channel, interaction.user.id)
-    if not is_owner and not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ **Hata:** Bu komutu yalnızca size ait olan posting kanalında kullanabilirsiniz.", ephemeral=True)
-        return
-        
-    try:
-        is_nsfw = (durum == "evet")
-        await interaction.channel.edit(nsfw=is_nsfw)
-        if is_nsfw:
-            await interaction.response.send_message("🔞 **Kanalınız yaş sınırlı (NSFW) olarak ayarlandı.**", ephemeral=True)
-        else:
-            await interaction.response.send_message("✅ **Kanalınızın yaş sınırı (NSFW) kaldırıldı.**", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Hata: {e}", ephemeral=True)
-
-@bot.tree.command(name="eslestir", description="Mevcut bir posting kanalını el ile bir kullanıcıya tam yetkili olarak atar.")
+@bot.tree.command(name="kanal_kurtar", description="Sunucudan çık-gir yapan kişiyi tekrar kanalının lideri (sahibi) yapar.")
 @app_commands.checks.has_permissions(administrator=True)
-async def eslestir(interaction: discord.Interaction, member: discord.Member, channel: discord.TextChannel):
+async def kanal_kurtar(interaction: discord.Interaction, member: discord.Member, channel: discord.TextChannel):
     global posting_registry
     try:
         await channel.set_permissions(member, read_messages=True, send_messages=True)
@@ -637,9 +544,48 @@ async def eslestir(interaction: discord.Interaction, member: discord.Member, cha
                     del posting_registry[ch_id_str]
                 await save_registry_to_log()
                 
-        await interaction.response.send_message(f"✅ **Başarılı!** {member.mention} kullanıcısı {channel.mention} kanalıyla eşleştirildi (Sahip yapıldı).", ephemeral=True)
+        yeni_isim = FORMAT_POSTING_NAME.replace("{name}", member.name)
+        if channel.name != yeni_isim:
+            await channel.edit(name=yeni_isim)
+            
+        await interaction.response.send_message(MSG_RECOVER_SUCCESS.replace("{member}", member.mention).replace("{channel}", channel.mention), ephemeral=True)
     except Exception as e:
-        await interaction.response.send_message(f"❌ İzinler güncellenirken hata: {e}", ephemeral=True)
+        await interaction.response.send_message(MSG_ERR_GENERIC.replace("{error}", str(e)), ephemeral=True)
+
+@bot.tree.command(name="izin", description="Sadece kendi posting kanalınızda birine mesaj yazma izni verebilir/alabilirsiniz.")
+@app_commands.describe(islem="'ver' veya 'al'", kullanici="İşlem yapılacak kişi")
+async def izin(interaction: discord.Interaction, islem: Literal["ver", "al"], kullanici: discord.Member):
+    global posting_registry
+    is_owner = check_is_owner(interaction.channel, interaction.user.id)
+    if not is_owner and not interaction.user.guild_permissions.administrator: return await interaction.response.send_message(MSG_ERR_NOT_OWNER, ephemeral=True)
+    if kullanici.id == interaction.user.id or kullanici.bot: return await interaction.response.send_message(MSG_ERR_SELF_BOT, ephemeral=True)
+        
+    try:
+        ch_id_str = str(interaction.channel.id)
+        if islem == "ver":
+            await interaction.channel.set_permissions(kullanici, read_messages=True, send_messages=True)
+            if ch_id_str not in posting_registry or not isinstance(posting_registry[ch_id_str], list): posting_registry[ch_id_str] = []
+            if kullanici.id not in posting_registry[ch_id_str]: posting_registry[ch_id_str].append(kullanici.id)
+            await save_registry_to_log()
+            await interaction.response.send_message(MSG_PERM_GIVEN.replace("{member}", kullanici.mention), ephemeral=True)
+        elif islem == "al":
+            await interaction.channel.set_permissions(kullanici, overwrite=None)
+            if ch_id_str in posting_registry and isinstance(posting_registry[ch_id_str], list) and kullanici.id in posting_registry[ch_id_str]:
+                posting_registry[ch_id_str].remove(kullanici.id)
+                if not posting_registry[ch_id_str]: del posting_registry[ch_id_str]
+            await save_registry_to_log()
+            await interaction.response.send_message(MSG_PERM_TAKEN.replace("{member}", kullanici.mention), ephemeral=True)
+    except Exception as e: await interaction.response.send_message(MSG_ERR_GENERIC.replace("{error}", str(e)), ephemeral=True)
+
+@bot.tree.command(name="nsfw", description="Kendi posting kanalınızı yaş sınırlı (NSFW) yapın veya kaldırın.")
+@app_commands.describe(durum="'evet' yaş sınırı ekler, 'hayır' kaldırır")
+async def nsfw(interaction: discord.Interaction, durum: Literal["evet", "hayır"]):
+    if not check_is_owner(interaction.channel, interaction.user.id) and not interaction.user.guild_permissions.administrator: return await interaction.response.send_message(MSG_ERR_NOT_OWNER, ephemeral=True)
+    try:
+        is_nsfw = (durum == "evet")
+        await interaction.channel.edit(nsfw=is_nsfw)
+        await interaction.response.send_message(MSG_NSFW_ON if is_nsfw else MSG_NSFW_OFF, ephemeral=True)
+    except Exception as e: await interaction.response.send_message(MSG_ERR_GENERIC.replace("{error}", str(e)), ephemeral=True)
 
 @bot.tree.command(name="startquiz", description="Manuel quiz başlatır.")
 @app_commands.checks.has_permissions(administrator=True)
@@ -648,41 +594,41 @@ async def start_quiz(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     if quiz_state["active"]:
         ch = bot.get_channel(QUIZ_CHANNEL_ID)
-        if ch: await ch.send(f"⏰ Yeni soru istendi! Eski cevap: **{quiz_state['vn_title']}**")
+        if ch: await ch.send(MSG_QUIZ_FORCE_NEW.replace("{title}", quiz_state['vn_title']))
     await start_quiz_question()
-    await interaction.followup.send("✅ Başlatıldı!", ephemeral=True)
+    await interaction.followup.send(MSG_STARTED, ephemeral=True)
 
 @bot.tree.command(name="setwelcome", description="Hoşgeldin mesajı değiştir.")
 @app_commands.checks.has_permissions(administrator=True)
 async def set_welcome(interaction: discord.Interaction, message: str):
-    global WELCOME_MESSAGE
-    WELCOME_MESSAGE = message
-    await interaction.response.send_message(f"✅ Güncellendi.", ephemeral=True)
+    global MSG_WELCOME
+    MSG_WELCOME = message
+    await interaction.response.send_message(MSG_UPDATED, ephemeral=True)
 
 @bot.tree.command(name="setbump", description="Bump mesajı değiştir.")
 @app_commands.checks.has_permissions(administrator=True)
 async def set_bump(interaction: discord.Interaction, message: str):
-    global BUMP_MESSAGE
-    BUMP_MESSAGE = message
-    await interaction.response.send_message(f"✅ Güncellendi.", ephemeral=True)
+    global MSG_BUMP
+    MSG_BUMP = message
+    await interaction.response.send_message(MSG_UPDATED, ephemeral=True)
 
 @bot.tree.command(name="startmedia", description="Medya döngüsünü başlat.")
 @app_commands.checks.has_permissions(administrator=True)
 async def start_media(interaction: discord.Interaction):
     global media_loop_running, media_loop_task
-    if media_loop_running: return await interaction.response.send_message("⚠️ Zaten çalışıyor!", ephemeral=True)
+    if media_loop_running: return await interaction.response.send_message(MSG_ALREADY_RUNNING, ephemeral=True)
     media_loop_running = True
     media_loop_task = asyncio.ensure_future(run_media_loop())
-    await interaction.response.send_message("✅ Başlatıldı.", ephemeral=True)
+    await interaction.response.send_message(MSG_STARTED, ephemeral=True)
 
 @bot.tree.command(name="stopmedia", description="Medya döngüsünü durdur.")
 @app_commands.checks.has_permissions(administrator=True)
 async def stop_media(interaction: discord.Interaction):
     global media_loop_running, media_loop_task
-    if not media_loop_running: return await interaction.response.send_message("⚠️ Zaten durmuş.", ephemeral=True)
+    if not media_loop_running: return await interaction.response.send_message(MSG_ALREADY_STOPPED, ephemeral=True)
     media_loop_running = False
     if media_loop_task: media_loop_task.cancel()
-    await interaction.response.send_message("🛑 Durduruldu.", ephemeral=True)
+    await interaction.response.send_message(MSG_STOPPED, ephemeral=True)
 
 if __name__ == "__main__":
     if TOKEN: bot.run(TOKEN)
