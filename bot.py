@@ -43,8 +43,12 @@ EMOJI_TRIGGER_ID           = 1507819144735756298
 EMOJI_RESPONSE_ID          = 1529887965265002618
 WEBHOOK_URL                = "https://discord.com/api/webhooks/1529887030144929923/iyBvXY9kALb9j62G7s9xjHTPdjFzg-Fnm3B0hY_pxlAGf8KtHMaHtdRovkpwi-XAcDuy"
 
+# Özel Ses Kanalı Ayarları
+VOICE_GENERATOR_CHANNEL_ID = 123456789012345678 # LÜTFEN BURAYI DEĞİŞTİR: Üyelerin girdiği "Oda Oluştur" ses kanalı ID'si
+VOICE_CATEGORY_ID          = 123456789012345678 # LÜTFEN BURAYI DEĞİŞTİR: Yeni ses kanallarının açılacağı kategori ID'si
+
 # ───────────────────────────────────────────────
-#  2. MESAJ VE METİN AYARLARI (İstediğin gibi düzenle)
+#  2. MESAJ VE METİN AYARLARI
 # ───────────────────────────────────────────────
 
 # -- Karşılama ve Çıkış --
@@ -53,36 +57,45 @@ MSG_LEAVE             = "{member} geri gitti... 🥺"
 MSG_BUMP              = "buuuuuump"
 
 # -- Quiz Sistemi Mesajları --
-MSG_QUIZ_NEW          = "🎮 **yeeni soru** bu medyanin adi ney?\n*(resmi uzaklastirmak icin 🔍, soruyu atlamak icin ⏭️ tepkisine basin)*"
-MSG_QUIZ_CORRECT      = "🎉 {member} bildi! cevap: **{title}** (+1 ise yaramaz puan)"
-MSG_QUIZ_CLUE         = "🔍 **buyutece tiklandi!** resim biraz daha zom outlanmistir:"
-MSG_QUIZ_FULL_OPEN    = "📢 **resim sonuna kadar acildi** bulamadiysanis ⏭️ basip atlayin."
-MSG_QUIZ_SKIP         = "⏭️ **oka tiklandi! soru atlanmistir.** cevap: **{title}** idi."
-MSG_QUIZ_FORCE_NEW    = "⏰ yeni soru! eskisinin cevabi: **{title}**"
+MSG_QUIZ_NEW          = "🎮 **yeeni soru** ney bu?\n*(resmi uzaklastirmak icin 🔍, soruyu atlamak icin ⏭️ tepkısıne tiklayin)*"
+MSG_QUIZ_CORRECT      = "🎉 {member} bildi hll olsun! cevap **{title}** idi (+1 puan)"
+MSG_QUIZ_CLUE         = "🔍 **ipucu** biri tepkiye basti, resim biras daha uzaklastirild
+ı:"
+MSG_QUIZ_FULL_OPEN    = "📢 **resim tamamen acildi!** bulamadiysanis ⏭️ basip atlayabılirsinis."
+MSG_QUIZ_SKIP         = "⏭️ **tepkiye tiklandi! soru atlandi.** cevap **{title}** idi."
+MSG_QUIZ_FORCE_NEW    = "⏰ yeni soriya gecildi! eskısinin cevabi **{title}** idi"
 MSG_QUIZ_LOG_POINT    = "{name} +1 puan"
 
 # -- İzin ve Hata Mesajları --
-MSG_ERR_NOT_OWNER     = "❌ **duuut:** sadece kendi postınginde eyleyebilirsin bu komudu."
-MSG_ERR_SELF_BOT      = "⚠️ kimi eklemeye calisiyon?"
-MSG_ERR_GENERIC       = "❌ duuut hata: {error}"
+MSG_ERR_NOT_OWNER     = "❌ **düüt:** sadece kendı kanalinizda kulanabılırsınis."
+MSG_ERR_SELF_BOT      = "⚠️ kimi ariyon ?."
+MSG_ERR_GENERIC       = "❌ düüüüt hata: {error}"
 
-# -- Komut Yanıtları --
-MSG_PERM_GIVEN        = "✅ {member} kullanicisina izin eylendi."
-MSG_PERM_TAKEN        = "✅ {member} kullanicisinin izni geri alindi."
-MSG_NSFW_ON           = "🔞 **kanaliniz ayipli oldu.**"
-MSG_NSFW_OFF          = "✅ **kanaliniz tekrar ayipsiz oldu.**"
-MSG_RECOVER_SUCCESS   = "✅ **hooppa!** {member} kullanicisi {channel} tekrar lider atandi."
+# -- Komut Yanıtları (Posting) --
+MSG_PERM_GIVEN        = "✅ {member} kisisine yazma ıznı verildi."
+MSG_PERM_TAKEN        = "✅ {member} kisininin yazma ıznı alindi."
+MSG_NSFW_ON           = "🔞 **kanalinis yas sinirli kanal olarak ayarlandi.**"
+MSG_NSFW_OFF          = "✅ **kanaliniz tekrar normal kanal oldi.**"
+MSG_RECOVER_SUCCESS   = "✅ **düt!** {member} kullanıcısı {channel} a atandi."
 
 # -- Sistem Komut Yanıtları --
-MSG_STARTED           = "✅ hoop basladi!"
-MSG_STOPPED           = "🛑 hoop durdu."
-MSG_UPDATED           = "✅ hoop guncellendi."
+MSG_STARTED           = "✅ basladi!"
+MSG_STOPPED           = "🛑 durdu."
+MSG_UPDATED           = "✅ guncelendi."
 MSG_ALREADY_RUNNING   = "⚠️ zaten calisiyo!"
 MSG_ALREADY_STOPPED   = "⚠️ zaten durmus."
 
+# -- Özel Ses Kanalı Mesajları --
+MSG_VOICE_UNLOCKED    = "🔓 ses kanali topluma acildi."
+MSG_VOICE_LOCKED      = "🔒 ses kanali kiltlendi. sadece /ekle komutuylan izin verilenler katilabilır."
+MSG_VOICE_ADDED       = "✅ {member} kisisine izin verıldı."
+MSG_VOICE_REMOVED     = "❌ {member} kisisinin izni alindi."
+MSG_VOICE_ERR_OWNER   = "⚠️ bu komtu **kendi** kanalinda kulanabılırsın sadece."
+
 # -- Diğer Formatlar --
-FORMAT_POSTING_NAME   = "﹛{name}-posting﹜" # Yeni açılan kanalların isim şablonu
-FORMAT_LOG_ATTACHMENT = "📎 **{name}** (#{channel})" # Log kanalına giden medya formatı
+FORMAT_POSTING_NAME   = "﹛{name}-posting﹜" 
+FORMAT_VOICE_NAME     = "{name} özel kanal" 
+FORMAT_LOG_ATTACHMENT = "📎 **{name}** (#{channel})" 
 
 
 # ───────────────────────────────────────────────
@@ -93,6 +106,7 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 intents.reactions = True
+intents.voice_states = True # Ses kanalı olayları için aktif edildi.
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -103,11 +117,9 @@ media_loop_task    = None
 media_queue        = []
 welcome_message_log: dict = {}
 
-# SOHBET AKTİFLİK KONTROLÜ İÇİN SET (Küme)
 active_users_this_hour = set()
-
-# Komutla izin verilen misafirlerin kaydı
-posting_registry   = {}
+posting_registry       = {}
+active_voice_channels  = {} # {channel_id: owner_id}
 
 asked_series_history = deque(maxlen=50)
 quiz_state = {
@@ -153,13 +165,11 @@ def check_is_owner(channel: discord.TextChannel, user_id: int) -> bool:
 
 async def save_registry_to_log():
     log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
-    if not log_channel:
-        return
+    if not log_channel: return
     try:
         async for msg in log_channel.history(limit=100):
             if msg.author == bot.user and LOG_HEADER in msg.content:
                 await msg.delete()
-        
         data_str = json.dumps(posting_registry)
         await log_channel.send(f"{LOG_HEADER}\n{data_str}")
     except Exception as e:
@@ -168,22 +178,17 @@ async def save_registry_to_log():
 async def load_registry():
     global posting_registry
     log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
-    if not log_channel:
-        return
+    if not log_channel: return
     try:
         async for msg in log_channel.history(limit=100):
             if msg.author == bot.user and LOG_HEADER in msg.content:
                 lines = msg.content.split("\n")
                 if len(lines) > 1:
                     raw_data = json.loads(lines[1])
-                    posting_registry = {}
-                    for k, v in raw_data.items():
-                        if isinstance(v, list):
-                            posting_registry[k] = v
+                    posting_registry = {k: v for k, v in raw_data.items() if isinstance(v, list)}
                     print(f"[sistem] Kanalların misafir verileri başarıyla hafızaya yüklendi.")
                     return
-    except Exception as e:
-        print(f"[sistem] Eski kayıtlar yüklenirken hata oluştu: {e}")
+    except Exception as e: print(f"[sistem] Eski kayıtlar yüklenirken hata oluştu: {e}")
 
 # ───────────────────────────────────────────────
 #  QUIZ HELPERS & IMAGE PROCESSING
@@ -341,14 +346,9 @@ async def run_media_loop():
         try:
             sleep_sec = get_seconds_until_next_hour()
             await asyncio.sleep(sleep_sec)
-            
             if not media_loop_running: break
-            
-            if len(active_users_this_hour) >= 6:
-                await post_random_media()
-                
+            if len(active_users_this_hour) >= 6: await post_random_media()
             active_users_this_hour.clear()
-            
         except asyncio.CancelledError: break
         except Exception as e:
             print(f"[media loop] Hata: {e}")
@@ -415,6 +415,45 @@ async def on_member_remove(member: discord.Member):
             await msg.edit(content=MSG_LEAVE.replace("{member}", member.mention))
         except Exception: pass
         finally: del welcome_message_log[member.id]
+
+@bot.event
+async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    global active_voice_channels
+    
+    # 1. Kullanıcı "Oluşturucu" kanala katıldığında:
+    if after.channel and after.channel.id == VOICE_GENERATOR_CHANNEL_ID:
+        guild = member.guild
+        category = guild.get_channel(VOICE_CATEGORY_ID) or after.channel.category
+
+        # Odayı kilitli ve sadece sahibinin yönetebileceği şekilde ayarla
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=True, connect=False),
+            member: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True)
+        }
+
+        channel_name = FORMAT_VOICE_NAME.replace("{name}", member.display_name)
+        try:
+            new_channel = await guild.create_voice_channel(
+                name=channel_name,
+                category=category,
+                overwrites=overwrites
+            )
+            # Üyeyi yeni odaya taşı
+            await member.move_to(new_channel)
+            active_voice_channels[new_channel.id] = member.id
+        except Exception as e:
+            print(f"[voice] Kanal oluşturma hatası: {e}")
+
+    # 2. Özel bir ses kanalından çıkış yapıldığında (Oda boş mu kontrolü)
+    if before.channel and before.channel.id in active_voice_channels:
+        # Eğer kanalda kimse kalmadıysa
+        if len(before.channel.members) == 0:
+            try:
+                await before.channel.delete()
+                del active_voice_channels[before.channel.id]
+            except Exception as e:
+                print(f"[voice] Kanal silme hatası: {e}")
+
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -527,8 +566,47 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             asyncio.create_task(next_quiz_question_delay(2.0))
 
 # ───────────────────────────────────────────────
+#  SES KANALI İÇİN YARDIMCI KONTROL
+# ───────────────────────────────────────────────
+def check_voice_ownership(interaction: discord.Interaction) -> discord.VoiceChannel:
+    if not interaction.user.voice or not interaction.user.voice.channel:
+        return None
+    vc = interaction.user.voice.channel
+    if vc.id in active_voice_channels and active_voice_channels[vc.id] == interaction.user.id:
+        return vc
+    return None
+
+# ───────────────────────────────────────────────
 #  SLASH COMMANDS
 # ───────────────────────────────────────────────
+
+@bot.tree.command(name="kilidiac", description="Özel ses kanalınızı herkese açık hale getirir.")
+async def kilidiac(interaction: discord.Interaction):
+    vc = check_voice_ownership(interaction)
+    if not vc: return await interaction.response.send_message(MSG_VOICE_ERR_OWNER, ephemeral=True)
+    await vc.set_permissions(interaction.guild.default_role, connect=True)
+    await interaction.response.send_message(MSG_VOICE_UNLOCKED, ephemeral=True)
+
+@bot.tree.command(name="kilitle", description="Özel ses kanalınızı tekrar kilitler.")
+async def kilitle(interaction: discord.Interaction):
+    vc = check_voice_ownership(interaction)
+    if not vc: return await interaction.response.send_message(MSG_VOICE_ERR_OWNER, ephemeral=True)
+    await vc.set_permissions(interaction.guild.default_role, connect=False)
+    await interaction.response.send_message(MSG_VOICE_LOCKED, ephemeral=True)
+
+@bot.tree.command(name="ekle", description="Özel ses kanalınıza birini eklersiniz.")
+async def ekle(interaction: discord.Interaction, uye: discord.Member):
+    vc = check_voice_ownership(interaction)
+    if not vc: return await interaction.response.send_message(MSG_VOICE_ERR_OWNER, ephemeral=True)
+    await vc.set_permissions(uye, connect=True)
+    await interaction.response.send_message(MSG_VOICE_ADDED.replace("{member}", uye.mention), ephemeral=True)
+
+@bot.tree.command(name="çıkar", description="Özel ses kanalınızdan birinin iznini alırsınız.")
+async def cikar(interaction: discord.Interaction, uye: discord.Member):
+    vc = check_voice_ownership(interaction)
+    if not vc: return await interaction.response.send_message(MSG_VOICE_ERR_OWNER, ephemeral=True)
+    await vc.set_permissions(uye, overwrite=None)
+    await interaction.response.send_message(MSG_VOICE_REMOVED.replace("{member}", uye.mention), ephemeral=True)
 
 @bot.tree.command(name="kanal_kurtar", description="Sunucudan çık-gir yapan kişiyi tekrar kanalının lideri (sahibi) yapar.")
 @app_commands.checks.has_permissions(administrator=True)
