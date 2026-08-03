@@ -59,7 +59,7 @@ MSG_BUMP              = "buuuuuump"
 # -- Quiz Sistemi Mesajları --
 MSG_QUIZ_NEW          = "🎮 **yeeni soru** ney bu?\n*(resmi uzaklastirmak icin 🔍, soruyu atlamak icin ⏭️ tepkısıne tiklayin)*"
 MSG_QUIZ_CORRECT      = "🎉 {member} bildi hll olsun! cevap **{title}** idi (+1 puan)"
-MSG_QUIZ_CLUE         = "🔍 **ipucu** biri tepkiye basti, resim biras daha uzaklastirild
+MSG_QUIZ_CLUE         = "🔍 **ipucu** biri tepkiye basti, resim biras daha uzaklastirild"
 ı:"
 MSG_QUIZ_FULL_OPEN    = "📢 **resim tamamen acildi!** bulamadiysanis ⏭️ basip atlayabılirsinis."
 MSG_QUIZ_SKIP         = "⏭️ **tepkiye tiklandi! soru atlandi.** cevap **{title}** idi."
