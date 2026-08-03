@@ -44,8 +44,9 @@ EMOJI_RESPONSE_ID          = 1529887965265002618
 WEBHOOK_URL                = "https://discord.com/api/webhooks/1529887030144929923/iyBvXY9kALb9j62G7s9xjHTPdjFzg-Fnm3B0hY_pxlAGf8KtHMaHtdRovkpwi-XAcDuy"
 
 # Özel Ses Kanalı Ayarları
-VOICE_GENERATOR_CHANNEL_ID = 123456789012345678 # LÜTFEN BURAYI DEĞİŞTİR: Üyelerin girdiği "Oda Oluştur" ses kanalı ID'si
-VOICE_CATEGORY_ID          = 123456789012345678 # LÜTFEN BURAYI DEĞİŞTİR: Yeni ses kanallarının açılacağı kategori ID'si
+VOICE_CATEGORY_ID          = 1381768081428185290 # Bahsettiğin kategori ID'si
+VOICE_GENERATOR_NAME       = "Oda Oluştur"
+VOICE_GENERATOR_CHANNEL_ID = None # Bot hazır olduğunda otomatik atanacak
 
 # ───────────────────────────────────────────────
 #  2. MESAJ VE METİN AYARLARI
@@ -359,11 +360,30 @@ async def run_media_loop():
 
 @bot.event
 async def on_ready():
-    global media_loop_running, media_loop_task, bump_task, quiz_state
+    global media_loop_running, media_loop_task, bump_task, quiz_state, VOICE_GENERATOR_CHANNEL_ID
     
     await load_registry()
     print(f"✅ Logged in as {bot.user}")
     
+    # --- Ses Kanalı Kontrolü ve Oluşturma ---
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        category = guild.get_channel(VOICE_CATEGORY_ID)
+        if category:
+            # Kategorinin içinde "Oda Oluştur" isimli kanal var mı?
+            generator_channel = discord.utils.get(category.voice_channels, name=VOICE_GENERATOR_NAME)
+            
+            if not generator_channel:
+                try:
+                    generator_channel = await guild.create_voice_channel(name=VOICE_GENERATOR_NAME, category=category)
+                    print(f"✅ Özel oda oluşturma kanalı yaratıldı. ID: {generator_channel.id}")
+                except Exception as e:
+                    print(f"❌ Kategoriye ses kanalı oluşturulurken hata: {e}")
+            
+            if generator_channel:
+                VOICE_GENERATOR_CHANNEL_ID = generator_channel.id
+                print(f"✅ Aktif Jeneratör Kanal ID'si: {VOICE_GENERATOR_CHANNEL_ID}")
+
     try:
         guild = discord.Object(id=GUILD_ID)
         bot.tree.clear_commands(guild=guild)
@@ -417,7 +437,7 @@ async def on_member_remove(member: discord.Member):
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    global active_voice_channels
+    global active_voice_channels, VOICE_GENERATOR_CHANNEL_ID
     
     # 1. Kullanıcı "Oluşturucu" kanala katıldığında:
     if after.channel and after.channel.id == VOICE_GENERATOR_CHANNEL_ID:
