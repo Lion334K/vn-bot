@@ -91,6 +91,8 @@ MSG_VOICE_LOCKED      = "🔒 ses kanali kiltlendi. sadece /ekle komutuylan izin
 MSG_VOICE_ADDED       = "✅ {member} kisisine izin verıldı."
 MSG_VOICE_REMOVED     = "❌ {member} kisisinin izni alindi."
 MSG_VOICE_ERR_OWNER   = "⚠️ bu komtu **kendi** kanalinda kulanabılırsın sadece."
+MSG_VOICE_HIDDEN      = "👻 ses kanali artik gizl, sadece icerdekiler gorebilir."
+MSG_VOICE_VISIBLE     = "👀 ses kanali artik herkes tarafindan gorulebilır."
 
 # -- Diğer Formatlar --
 FORMAT_POSTING_NAME   = "﹛{name}-posting﹜" 
@@ -612,6 +614,22 @@ async def kilitle(interaction: discord.Interaction):
     if not vc: return await interaction.response.send_message(MSG_VOICE_ERR_OWNER, ephemeral=True)
     await vc.set_permissions(interaction.guild.default_role, connect=False)
     await interaction.response.send_message(MSG_VOICE_LOCKED, ephemeral=True)
+
+@bot.tree.command(name="gizle", description="Özel ses kanalınızı diğerlerinden gizler.")
+async def gizle(interaction: discord.Interaction):
+    vc = check_voice_ownership(interaction)
+    if not vc: return await interaction.response.send_message(MSG_VOICE_ERR_OWNER, ephemeral=True)
+    # Varsayılan rolün kanalı görme yetkisini kapatıyoruz
+    await vc.set_permissions(interaction.guild.default_role, view_channel=False)
+    await interaction.response.send_message(MSG_VOICE_HIDDEN, ephemeral=True)
+
+@bot.tree.command(name="göster", description="Özel ses kanalınızı tekrar herkese görünür yapar.")
+async def goster(interaction: discord.Interaction):
+    vc = check_voice_ownership(interaction)
+    if not vc: return await interaction.response.send_message(MSG_VOICE_ERR_OWNER, ephemeral=True)
+    # Varsayılan rolün kanalı görme yetkisini geri veriyoruz
+    await vc.set_permissions(interaction.guild.default_role, view_channel=True)
+    await interaction.response.send_message(MSG_VOICE_VISIBLE, ephemeral=True)
 
 @bot.tree.command(name="ekle", description="Özel ses kanalınıza birini eklersiniz.")
 async def ekle(interaction: discord.Interaction, uye: discord.Member):
