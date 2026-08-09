@@ -48,6 +48,9 @@ VOICE_CATEGORY_ID          = 1381768081428185290
 VOICE_GENERATOR_NAME       = "Oda Oluştur"
 VOICE_GENERATOR_CHANNEL_ID = None
 
+# Rol Ayarları
+INACTIVE_ROLE_ID           = 1535807591207407627
+
 # ───────────────────────────────────────────────
 #  2. MESAJ VE METİN AYARLARI
 # ───────────────────────────────────────────────
@@ -473,12 +476,6 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 @bot.event
 async def on_message(message: discord.Message):
     global bump_task, quiz_state, active_users_this_hour
-
-    if message.channel.id == VERIFY_CHANNEL_ID and not message.author.bot:
-        try:
-            await message.delete()
-        except:
-            pass
     
     if not message.author.bot: 
         active_users_this_hour.add(message.author.id)
@@ -770,7 +767,6 @@ async def aktifim(interaction: discord.Interaction):
 async def inaktif_taramasi(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     
-    INACTIVE_ROLE_ID = 1535807591207407627
     LEVEL_ROLE_IDS = [
         1489964270518141058, 
         1489963890505679088, 
