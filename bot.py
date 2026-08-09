@@ -758,8 +758,8 @@ async def aktifim(interaction: discord.Interaction):
                 erikafur_listesi.append(interaction.user.id)
                 log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
                 if log_channel:
-                    liste_str = ", ".join(str(uid) for uid in erikafur_listesi)
-                    await log_channel.send(f"**erikafur** | Doğrulananlar Listesi Güncellendi:\n```{liste_str}```")
+                    zaman = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M:%S")
+                    await log_channel.send(f"**erikafur** | Yeni Doğrulama: `{interaction.user} (ID: {interaction.user.id})` — Zaman: `{zaman} UTC`")
         except Exception as e:
             await interaction.response.send_message(f"❌ Bir hata oluştu: {e}", ephemeral=True)
     else:
