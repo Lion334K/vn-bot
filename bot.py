@@ -122,6 +122,7 @@ welcome_message_log: dict = {}
 active_users_this_hour = set()
 posting_registry       = {}
 active_voice_channels  = {} 
+erikafur_listesi       = []
 
 asked_series_history = deque(maxlen=50)
 quiz_state = {
@@ -472,6 +473,12 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
 @bot.event
 async def on_message(message: discord.Message):
     global bump_task, quiz_state, active_users_this_hour
+
+    if message.channel.id == VERIFY_CHANNEL_ID and not message.author.bot:
+        try:
+            await message.delete()
+        except:
+            pass
     
     if not message.author.bot: 
         active_users_this_hour.add(message.author.id)
@@ -735,6 +742,28 @@ async def stop_media(interaction: discord.Interaction):
     media_loop_running = False
     if media_loop_task: media_loop_task.cancel()
     await interaction.response.send_message(MSG_STOPPED, ephemeral=True)
+
+# 🛑 YENİ: AKTİFİM DOĞRULAMA KOMUTU
+@bot.tree.command(name="aktifim", description="İnaktif durumundan çıkıp sunucuya tekrar katılmanızı sağlar.")
+async def aktifim(interaction: discord.Interaction):
+    inactive_role = interaction.guild.get_role(INACTIVE_ROLE_ID)
+    
+    if inactive_role and inactive_role in interaction.user.roles:
+        try:
+            await interaction.user.remove_roles(inactive_role, reason="/aktifim komutu ile kendini doğruladı.")
+            await interaction.response.send_message("✅ **Harika!** İnaktif durumdan başarıyla çıktın.", ephemeral=True)
+            
+            # erikafur listesine kaydetme işlemi
+            if interaction.user.id not in erikafur_listesi:
+                erikafur_listesi.append(interaction.user.id)
+                log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
+                if log_channel:
+                    liste_str = ", ".join(str(uid) for uid in erikafur_listesi)
+                    await log_channel.send(f"**erikafur** | Doğrulananlar Listesi Güncellendi:\n```{liste_str}```")
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Bir hata oluştu: {e}", ephemeral=True)
+    else:
+        await interaction.response.send_message("⚠️ Zaten inaktif listesinde değilsin veya rol bulunamadı!", ephemeral=True)
 
 @bot.tree.command(name="inaktif_taramasi", description="2 aydır sunucuda olup level rolü olmayanlara inaktif rolü verir.")
 @app_commands.checks.has_permissions(administrator=True)
