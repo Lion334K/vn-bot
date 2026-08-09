@@ -44,9 +44,9 @@ EMOJI_RESPONSE_ID          = 1529887965265002618
 WEBHOOK_URL                = "https://discord.com/api/webhooks/1529887030144929923/iyBvXY9kALb9j62G7s9xjHTPdjFzg-Fnm3B0hY_pxlAGf8KtHMaHtdRovkpwi-XAcDuy"
 
 # Özel Ses Kanalı Ayarları
-VOICE_CATEGORY_ID          = 1381768081428185290 # Bahsettiğin kategori ID'si
+VOICE_CATEGORY_ID          = 1381768081428185290
 VOICE_GENERATOR_NAME       = "Oda Oluştur"
-VOICE_GENERATOR_CHANNEL_ID = None # Bot hazır olduğunda otomatik atanacak
+VOICE_GENERATOR_CHANNEL_ID = None
 
 # ───────────────────────────────────────────────
 #  2. MESAJ VE METİN AYARLARI
@@ -91,8 +91,8 @@ MSG_VOICE_LOCKED      = "🔒 ses kanali kiltlendi. sadece /ekle komutuylan izin
 MSG_VOICE_ADDED       = "✅ {member} kisisine izin verıldı."
 MSG_VOICE_REMOVED     = "❌ {member} kisisinin izni alindi."
 MSG_VOICE_ERR_OWNER   = "⚠️ bu komtu **kendi** kanalinda kulanabılırsın sadece."
-MSG_VOICE_HIDDEN      = "👻 ses kanali artik gizl, sadece icerdekiler gorebilir."
-MSG_VOICE_VISIBLE     = "👀 ses kanali artik herkes tarafindan gorulebilır."
+MSG_VOICE_HIDDEN      = "👻 ses kanali artik gizli, sadece icerdekiler gorebilir."
+MSG_VOICE_VISIBLE     = "👀 ses kanali artik herkes tarafindan gorulebilr."
 
 # -- Diğer Formatlar --
 FORMAT_POSTING_NAME   = "﹛{name}-posting﹜" 
@@ -108,7 +108,7 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 intents.reactions = True
-intents.voice_states = True # Ses kanalı olayları için aktif edildi.
+intents.voice_states = True 
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -121,7 +121,7 @@ welcome_message_log: dict = {}
 
 active_users_this_hour = set()
 posting_registry       = {}
-active_voice_channels  = {} # {channel_id: owner_id}
+active_voice_channels  = {} 
 
 asked_series_history = deque(maxlen=50)
 quiz_state = {
@@ -367,12 +367,10 @@ async def on_ready():
     await load_registry()
     print(f"✅ Logged in as {bot.user}")
     
-    # --- Ses Kanalı Kontrolü ve Oluşturma ---
     guild = bot.get_guild(GUILD_ID)
     if guild:
         category = guild.get_channel(VOICE_CATEGORY_ID)
         if category:
-            # Kategorinin içinde "Oda Oluştur" isimli kanal var mı?
             generator_channel = discord.utils.get(category.voice_channels, name=VOICE_GENERATOR_NAME)
             
             if not generator_channel:
@@ -441,12 +439,10 @@ async def on_member_remove(member: discord.Member):
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     global active_voice_channels, VOICE_GENERATOR_CHANNEL_ID
     
-    # 1. Kullanıcı "Oluşturucu" kanala katıldığında:
     if after.channel and after.channel.id == VOICE_GENERATOR_CHANNEL_ID:
         guild = member.guild
         category = guild.get_channel(VOICE_CATEGORY_ID) or after.channel.category
 
-        # Odayı kilitli ve sadece sahibinin yönetebileceği şekilde ayarla
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=True, connect=False),
             member: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True)
@@ -459,15 +455,12 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                 category=category,
                 overwrites=overwrites
             )
-            # Üyeyi yeni odaya taşı
             await member.move_to(new_channel)
             active_voice_channels[new_channel.id] = member.id
         except Exception as e:
             print(f"[voice] Kanal oluşturma hatası: {e}")
 
-    # 2. Özel bir ses kanalından çıkış yapıldığında (Oda boş mu kontrolü)
     if before.channel and before.channel.id in active_voice_channels:
-        # Eğer kanalda kimse kalmadıysa
         if len(before.channel.members) == 0:
             try:
                 await before.channel.delete()
@@ -619,7 +612,6 @@ async def kilitle(interaction: discord.Interaction):
 async def gizle(interaction: discord.Interaction):
     vc = check_voice_ownership(interaction)
     if not vc: return await interaction.response.send_message(MSG_VOICE_ERR_OWNER, ephemeral=True)
-    # Varsayılan rolün kanalı görme yetkisini kapatıyoruz
     await vc.set_permissions(interaction.guild.default_role, view_channel=False)
     await interaction.response.send_message(MSG_VOICE_HIDDEN, ephemeral=True)
 
@@ -627,7 +619,6 @@ async def gizle(interaction: discord.Interaction):
 async def goster(interaction: discord.Interaction):
     vc = check_voice_ownership(interaction)
     if not vc: return await interaction.response.send_message(MSG_VOICE_ERR_OWNER, ephemeral=True)
-    # Varsayılan rolün kanalı görme yetkisini geri veriyoruz
     await vc.set_permissions(interaction.guild.default_role, view_channel=True)
     await interaction.response.send_message(MSG_VOICE_VISIBLE, ephemeral=True)
 
@@ -744,6 +735,50 @@ async def stop_media(interaction: discord.Interaction):
     media_loop_running = False
     if media_loop_task: media_loop_task.cancel()
     await interaction.response.send_message(MSG_STOPPED, ephemeral=True)
+
+@bot.tree.command(name="inaktif_taramasi", description="2 aydır sunucuda olup level rolü olmayanlara inaktif rolü verir.")
+@app_commands.checks.has_permissions(administrator=True)
+async def inaktif_taramasi(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    
+    INACTIVE_ROLE_ID = 1535807591207407627
+    LEVEL_ROLE_IDS = [
+        1489964270518141058, 
+        1489963890505679088, 
+        1503004591585759344, 
+        1489963940732735649, 
+        1503007942142722108, 
+        1489963981404770416, 
+        1489964031719772272
+    ]
+    
+    guild = interaction.guild
+    inactive_role = guild.get_role(INACTIVE_ROLE_ID)
+    
+    if not inactive_role:
+        return await interaction.followup.send("❌ **Hata:** İnaktif rolü sunucuda bulunamadı. Lütfen ID'yi kontrol edin.", ephemeral=True)
+        
+    iki_ay_once = discord.utils.utcnow() - timedelta(days=60)
+    
+    etkilenen_kisi_sayisi = 0
+    
+    for member in guild.members:
+        if member.bot:
+            continue
+            
+        if member.joined_at and member.joined_at < iki_ay_once:
+            has_level_role = any(role.id in LEVEL_ROLE_IDS for role in member.roles)
+            
+            if not has_level_role and inactive_role not in member.roles:
+                try:
+                    await member.add_roles(inactive_role, reason="Sistem: 2 aydır sunucuda ve level rolü yok.")
+                    etkilenen_kisi_sayisi += 1
+                    
+                    await asyncio.sleep(0.5) 
+                except Exception as e:
+                    print(f"[{member.name}] kişisine rol verilirken hata oluştu: {e}")
+                    
+    await interaction.followup.send(f"✅ **Tarama Tamamlandı!**\nBelirtilen kriterlere uyan toplam **{etkilenen_kisi_sayisi}** üyeye İnaktif rolü verildi.", ephemeral=True)
 
 if __name__ == "__main__":
     if TOKEN: bot.run(TOKEN)
