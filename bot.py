@@ -24,7 +24,6 @@ BUMP_CHANNEL_ID            = 1381771230964748370
 GUILD_ID                   = 1381768080610426930
 BUMP_BOT_ID                = 302050872383242240
 IMAGE_LOG_CHANNEL_ID       = 1381770621054091306
-ANNOUNCE_SOURCE_CHANNEL_ID = 1489993668126572545
 EMBED_POOL_CHANNEL_ID      = 1501344668242280559
 
 # Quiz Kanalları
@@ -501,14 +500,6 @@ async def on_message(message: discord.Message):
             log_text = FORMAT_LOG_ATTACHMENT.replace("{name}", message.author.display_name).replace("{channel}", message.channel.name)
             for a in message.attachments: await log_channel.send(log_text, file=await a.to_file())
 
-    if message.channel.id == ANNOUNCE_SOURCE_CHANNEL_ID and not message.author.bot:
-        welcome_channel = bot.get_channel(WELCOME_CHANNEL_ID)
-        if welcome_channel:
-            if message.content: await welcome_channel.send(message.content)
-            for a in message.attachments: await welcome_channel.send(file=await a.to_file())
-            for embed in message.embeds:
-                if embed.type not in ("image", "gifv", "video"): await welcome_channel.send(embed=embed)
-
     if message.channel.id == BUMP_CHANNEL_ID:
         if message.author == bot.user and message.content == MSG_BUMP: return
         if message.author.id == BUMP_BOT_ID:
@@ -740,7 +731,30 @@ async def stop_media(interaction: discord.Interaction):
     if media_loop_task: media_loop_task.cancel()
     await interaction.response.send_message(MSG_STOPPED, ephemeral=True)
 
-# 🛑 YENİ: AKTİFİM DOĞRULAMA KOMUTU
+@bot.tree.command(name="yaz", description="Bot aracılığıyla istediğiniz kanala mesaj veya dosya gönderin.")
+@app_commands.describe(kanal="Mesajın gönderileceği kanal", mesaj="Gönderilecek metin", eklenti="İsteğe bağlı eklenecek dosya/resim")
+@app_commands.checks.has_permissions(administrator=True)
+async def yaz(interaction: discord.Interaction, kanal: discord.TextChannel, mesaj: str = None, eklenti: discord.Attachment = None):
+    if not mesaj and not eklenti:
+        return await interaction.response.send_message("❌ Göndermek için ya bir mesaj yazmalı ya da bir dosya yüklemelisin!", ephemeral=True)
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        if eklenti:
+            file = await eklenti.to_file()
+            await kanal.send(content=mesaj, file=file)
+        else:
+            await kanal.send(content=mesaj)
+            
+        await interaction.followup.send(f"✅ Mesajın başarıyla {kanal.mention} kanalına gönderildi.", ephemeral=True)
+        
+    except discord.Forbidden:
+        await interaction.followup.send(f"❌ Botun {kanal.mention} kanalına mesaj gönderme yetkisi yok!", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Bir hata oluştu: {e}", ephemeral=True)
+
+
 @bot.tree.command(name="aktifim", description="İnaktif durumundan çıkıp sunucuya tekrar katılmanızı sağlar.")
 async def aktifim(interaction: discord.Interaction):
     inactive_role = interaction.guild.get_role(INACTIVE_ROLE_ID)
@@ -750,7 +764,6 @@ async def aktifim(interaction: discord.Interaction):
             await interaction.user.remove_roles(inactive_role, reason="/aktifim komutu ile kendini doğruladı.")
             await interaction.response.send_message("✅ **Harika!** İnaktif durumdan başarıyla çıktın.", ephemeral=True)
             
-            # erikafur listesine kaydetme işlemi
             if interaction.user.id not in erikafur_listesi:
                 erikafur_listesi.append(interaction.user.id)
                 log_channel = bot.get_channel(IMAGE_LOG_CHANNEL_ID)
