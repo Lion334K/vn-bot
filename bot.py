@@ -17,7 +17,7 @@ from typing import Literal
 #  1. KANAL & ID AYARLARI
 # ───────────────────────────────────────────────
 
-TOKEN = "MTQ3ODg0MjI0NzY2NjU5Nzk4MA.GS36cj.8ICIz9I8YiyeN3qXBzZbD52KSBTm2t1iKYZRnI"
+TOKEN = "MTQ3ODg0MjI0NzY2NjU5Nzk4MA.GN2Wm_.3kQUTIH3ZVodJyNys_0NSqllciSeyMacTEHbf0"
 
 WELCOME_CHANNEL_ID         = 1488662459009994965
 BUMP_CHANNEL_ID            = 1381771230964748370
