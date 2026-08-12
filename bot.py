@@ -819,4 +819,11 @@ async def inaktif_taramasi(interaction: discord.Interaction):
     await interaction.followup.send(f"✅ **Tarama Tamamlandı!**\nBelirtilen kriterlere uyan toplam **{etkilenen_kisi_sayisi}** üyeye İnaktif rolü verildi.", ephemeral=True)
 
 if __name__ == "__main__":
-    if TOKEN: bot.run(TOKEN)
+    print("Bot baslatiliyor, sistem kontrol ediliyor...")
+    
+    if TOKEN:
+        print("✅ Token basariyla bulundu! Discord'a baglaniliyor...")
+        bot.run(TOKEN)
+    else:
+        print("❌ HATA: TOKEN BULUNAMADI!")
+        print("Lutfen Wispbyte panelindeki 'Variables' kisminda degisken adinin tam olarak DISCORD_TOKEN oldugundan ve icinin dolu oldugundan emin olun.")
